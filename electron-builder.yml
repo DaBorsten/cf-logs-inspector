@@ -1,0 +1,17 @@
+appId: dev.stockbal.cf-log-inspector
+productName: cf-log-inspector
+directories:
+  output: release
+  buildResources: resources
+files:
+  - out/**
+asarUnpack:
+  - '**/*.node'
+win:
+  target: [nsis]
+mac:
+  target: [dmg, zip]
+  category: public.app-category.developer-tools
+linux:
+  target: [AppImage, deb]
+  category: Development
