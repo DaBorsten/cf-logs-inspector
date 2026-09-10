@@ -1,10 +1,17 @@
-import { DEFAULT_OPERATOR, KEYWORDS, type DqlNode, type FieldRef, type Literal, type RangeOp, type Span } from './ast';
+import {
+  DEFAULT_OPERATOR,
+  KEYWORDS,
+  type DqlNode,
+  type FieldRef,
+  type Literal,
+  type RangeOp,
+  type Span,
+} from './ast';
 import { DqlSyntaxError, type DqlError } from './errors';
 import { tokenize, type Token, type TokenType } from './tokenizer';
 
 export type ParseResult =
-  | { ok: true; ast: DqlNode; tokens: Token[] }
-  | { ok: false; error: DqlError; tokens: Token[] };
+  { ok: true; ast: DqlNode; tokens: Token[] } | { ok: false; error: DqlError; tokens: Token[] };
 
 const RANGE_TYPES: ReadonlySet<TokenType> = new Set(['gt', 'gte', 'lt', 'lte']);
 const RANGE_OPS: Record<string, RangeOp> = { gt: '>', gte: '>=', lt: '<', lte: '<=' };
@@ -42,7 +49,12 @@ export function stripSpans(node: DqlNode): DqlNode {
     case 'exists':
       return { type: 'exists', field: stripField(node.field) };
     case 'range':
-      return { type: 'range', field: stripField(node.field), op: node.op, value: stripLiteral(node.value) };
+      return {
+        type: 'range',
+        field: stripField(node.field),
+        op: node.op,
+        value: stripLiteral(node.value),
+      };
   }
 }
 
@@ -104,17 +116,24 @@ class Parser {
     const first = this.peek();
     if (first.type === 'quoted') {
       this.next();
-      if (first.unterminated) throw new DqlSyntaxError('Unterminated quoted string', first.start, first.end);
+      if (first.unterminated)
+        throw new DqlSyntaxError('Unterminated quoted string', first.start, first.end);
       return literalOf(first);
     }
     if (first.type !== 'term') return undefined;
     this.next();
     let raw = first.value;
-    let segments: string[] | undefined = first.wildcardSegments ? [...first.wildcardSegments] : undefined;
+    let segments: string[] | undefined = first.wildcardSegments
+      ? [...first.wildcardSegments]
+      : undefined;
     let end = first.end;
     for (;;) {
       const t = this.peek();
-      if (t.precededBySpace || !(t.type === 'term' || t.type === 'colon' || RANGE_TYPES.has(t.type))) break;
+      if (
+        t.precededBySpace ||
+        !(t.type === 'term' || t.type === 'colon' || RANGE_TYPES.has(t.type))
+      )
+        break;
       this.next();
       raw += t.value;
       end = t.end;
@@ -126,7 +145,12 @@ class Parser {
         segments[segments.length - 1] += t.value;
       }
     }
-    const lit: Literal = { raw, quoted: false, hasWildcard: segments !== undefined, span: { start: first.start, end } };
+    const lit: Literal = {
+      raw,
+      quoted: false,
+      hasWildcard: segments !== undefined,
+      span: { start: first.start, end },
+    };
     if (segments) lit.segments = segments;
     return lit;
   }
@@ -150,7 +174,9 @@ class Parser {
       this.expectClauseStart('or');
       children.push(this.parseAnd());
     }
-    return children.length === 1 ? children[0]! : { type: 'or', children, span: this.spanFrom(start) };
+    return children.length === 1
+      ? children[0]!
+      : { type: 'or', children, span: this.spanFrom(start) };
   }
 
   private parseAnd(): DqlNode {
@@ -172,7 +198,9 @@ class Parser {
         break;
       }
     }
-    return children.length === 1 ? children[0]! : { type: 'and', children, span: this.spanFrom(start) };
+    return children.length === 1
+      ? children[0]!
+      : { type: 'and', children, span: this.spanFrom(start) };
   }
 
   private parseNot(): DqlNode {
@@ -220,7 +248,11 @@ class Parser {
 
     if (t.type === 'term') {
       if (this.isKeyword(t, 'and') || this.isKeyword(t, 'or')) {
-        throw new DqlSyntaxError(`Unexpected operator '${t.text}'; expected a term or field`, t.start, t.end);
+        throw new DqlSyntaxError(
+          `Unexpected operator '${t.text}'; expected a term or field`,
+          t.start,
+          t.end,
+        );
       }
       const n = this.peek(1);
       if (!n.precededBySpace && (n.type === 'colon' || RANGE_TYPES.has(n.type))) {
@@ -246,7 +278,11 @@ class Parser {
   private expectRParen(open: Token): void {
     const t = this.peek();
     if (t.type !== 'rparen') {
-      throw new DqlSyntaxError(`Expected ')' to close group opened at column ${open.start + 1}`, t.start, t.end);
+      throw new DqlSyntaxError(
+        `Expected ')' to close group opened at column ${open.start + 1}`,
+        t.start,
+        t.end,
+      );
     }
     this.next();
   }
@@ -265,7 +301,11 @@ class Parser {
     // op is ':'
     const v = this.peek();
     if (v.type === 'eof' || v.type === 'rparen') {
-      throw new DqlSyntaxError(`Expected a value after ':' for field '${field.name}'`, op.start, Math.max(op.end, v.start));
+      throw new DqlSyntaxError(
+        `Expected a value after ':' for field '${field.name}'`,
+        op.start,
+        Math.max(op.end, v.start),
+      );
     }
     if (RANGE_TYPES.has(v.type)) {
       this.next();
@@ -273,7 +313,8 @@ class Parser {
     }
     if (v.type === 'lparen') {
       this.next();
-      if (this.peek().type === 'rparen') throw new DqlSyntaxError('Empty group', v.start, this.peek().end);
+      if (this.peek().type === 'rparen')
+        throw new DqlSyntaxError('Empty group', v.start, this.peek().end);
       const node = this.parseValueOr(field);
       this.expectRParen(v);
       return withSpan(node, { start: fieldTok.start, end: this.tokens[this.pos - 1]!.end });
@@ -285,19 +326,35 @@ class Parser {
     const v = this.peek();
     const value = this.readValueLiteral();
     if (!value) {
-      throw new DqlSyntaxError(`Range operator '${opTok.text}' requires a value`, opTok.start, Math.max(opTok.end, v.start));
+      throw new DqlSyntaxError(
+        `Range operator '${opTok.text}' requires a value`,
+        opTok.start,
+        Math.max(opTok.end, v.start),
+      );
     }
-    return { type: 'range', field, op: RANGE_OPS[opTok.type]!, value, span: { start, end: value.span!.end } };
+    return {
+      type: 'range',
+      field,
+      op: RANGE_OPS[opTok.type]!,
+      value,
+      span: { start, end: value.span!.end },
+    };
   }
 
   private parseSingleValue(field: FieldRef, start: number): DqlNode {
     const v = this.peek();
-    if (v.type === 'term' && v.value === '*' && !v.text.includes('\\') && this.endsValueRun(this.peek(1))) {
+    if (
+      v.type === 'term' &&
+      v.value === '*' &&
+      !v.text.includes('\\') &&
+      this.endsValueRun(this.peek(1))
+    ) {
       this.next();
       return { type: 'exists', field, span: { start, end: v.end } };
     }
     const value = this.readValueLiteral();
-    if (!value) throw new DqlSyntaxError(`Expected a value for field '${field.name}'`, v.start, v.end);
+    if (!value)
+      throw new DqlSyntaxError(`Expected a value for field '${field.name}'`, v.start, v.end);
     return { type: 'match', field, value, span: { start, end: value.span!.end } };
   }
 
@@ -341,7 +398,8 @@ class Parser {
     }
     if (t.type === 'lparen') {
       this.next();
-      if (this.peek().type === 'rparen') throw new DqlSyntaxError('Empty group', t.start, this.peek().end);
+      if (this.peek().type === 'rparen')
+        throw new DqlSyntaxError('Empty group', t.start, this.peek().end);
       const inner = this.parseValueOr(field);
       this.expectRParen(t);
       return inner;
@@ -357,11 +415,19 @@ class Parser {
   }
 
   private endsValueRun(t: Token): boolean {
-    return t.type === 'eof' || t.type === 'rparen' || t.type === 'lparen' || t.type === 'quoted' || t.precededBySpace;
+    return (
+      t.type === 'eof' ||
+      t.type === 'rparen' ||
+      t.type === 'lparen' ||
+      t.type === 'quoted' ||
+      t.precededBySpace
+    );
   }
 
   private startsValue(t: Token): boolean {
-    return t.type === 'term' || t.type === 'quoted' || t.type === 'lparen' || RANGE_TYPES.has(t.type);
+    return (
+      t.type === 'term' || t.type === 'quoted' || t.type === 'lparen' || RANGE_TYPES.has(t.type)
+    );
   }
 
   private expectValueStart(afterKeyword: string): void {

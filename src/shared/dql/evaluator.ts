@@ -19,7 +19,11 @@ export type Matcher = (record: Record<string, unknown>) => boolean;
 const DEFAULT_TEXT_FIELDS = ['message'];
 const DATE_FIELDS = new Set(['timestamp', 'ts', '@timestamp', 'time']);
 
-export function evaluate(ast: DqlNode, record: Record<string, unknown>, opts?: EvalOptions): boolean {
+export function evaluate(
+  ast: DqlNode,
+  record: Record<string, unknown>,
+  opts?: EvalOptions,
+): boolean {
   return compileMatcher(ast, opts)(record);
 }
 
@@ -161,7 +165,11 @@ function literalTester(lit: Literal, kind: FieldKind): (v: unknown) => boolean {
   return (v) => toText(v).toLowerCase() === needle;
 }
 
-function rangeTester(op: '>' | '>=' | '<' | '<=', lit: Literal, kind: FieldKind): (v: unknown) => boolean {
+function rangeTester(
+  op: '>' | '>=' | '<' | '<=',
+  lit: Literal,
+  kind: FieldKind,
+): (v: unknown) => boolean {
   const cmp = (a: number | string, b: number | string): boolean =>
     op === '>' ? a > b : op === '>=' ? a >= b : op === '<' ? a < b : a <= b;
 

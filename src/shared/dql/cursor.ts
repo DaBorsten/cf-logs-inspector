@@ -33,18 +33,32 @@ export function completionContextAt(input: string, cursor: number): CompletionCo
       const field = fieldBefore(tokens, idx - 1);
       if (field !== undefined) {
         const g = groupInfo(tokens, idx);
-        return { kind: 'value', field, prefix: stripQuote(prefix, inTok), replace, inGroup: g.inGroup };
+        return {
+          kind: 'value',
+          field,
+          prefix: stripQuote(prefix, inTok),
+          replace,
+          inGroup: g.inGroup,
+        };
       }
     }
     if (inTok.type === 'quoted') return { kind: 'none' };
     const g = groupInfo(tokens, idx);
     if (g.inGroup && g.field !== undefined) {
       // inside field:( ... ) — literals here are values unless they look like keywords
-      if (!KEYWORDS.has(prefix.toLowerCase()) && prev && (prev.type === 'lparen' || isKeyword(prev))) {
+      if (
+        !KEYWORDS.has(prefix.toLowerCase()) &&
+        prev &&
+        (prev.type === 'lparen' || isKeyword(prev))
+      ) {
         return { kind: 'value', field: g.field, prefix, replace, inGroup: true };
       }
     }
-    if (prev && (prev.type === 'term' || prev.type === 'quoted' || prev.type === 'rparen') && !isKeyword(prev)) {
+    if (
+      prev &&
+      (prev.type === 'term' || prev.type === 'quoted' || prev.type === 'rparen') &&
+      !isKeyword(prev)
+    ) {
       // "level:ERROR an|" → operator being typed (but a field name is equally possible; offer both via prefix)
       return { kind: 'operator', prefix, replace };
     }
@@ -56,7 +70,13 @@ export function completionContextAt(input: string, cursor: number): CompletionCo
     const field = fieldBefore(tokens, idx);
     if (field !== undefined) {
       const g = groupInfo(tokens, idx + 1);
-      return { kind: 'value', field, prefix: '', replace: { start: cursor, end: cursor }, inGroup: g.inGroup };
+      return {
+        kind: 'value',
+        field,
+        prefix: '',
+        replace: { start: cursor, end: cursor },
+        inGroup: g.inGroup,
+      };
     }
     return { kind: 'none' };
   }
@@ -79,7 +99,8 @@ export function completionContextAt(input: string, cursor: number): CompletionCo
 
   const g = groupInfo(tokens, prevIdx + 1);
   if (prev.type === 'lparen' || isKeyword(prev)) {
-    if (g.inGroup && g.field !== undefined) return { kind: 'value', field: g.field, prefix: '', replace, inGroup: true };
+    if (g.inGroup && g.field !== undefined)
+      return { kind: 'value', field: g.field, prefix: '', replace, inGroup: true };
     return { kind: 'field-or-term', prefix: '', replace };
   }
   // previous token completes a clause (term, quoted, rparen)

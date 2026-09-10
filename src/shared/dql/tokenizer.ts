@@ -1,14 +1,5 @@
 export type TokenType =
-  | 'lparen'
-  | 'rparen'
-  | 'colon'
-  | 'gt'
-  | 'gte'
-  | 'lt'
-  | 'lte'
-  | 'quoted'
-  | 'term'
-  | 'eof';
+  'lparen' | 'rparen' | 'colon' | 'gt' | 'gte' | 'lt' | 'lte' | 'quoted' | 'term' | 'eof';
 
 export interface Token {
   type: TokenType;
@@ -92,7 +83,13 @@ export function tokenize(input: string): Token[] {
         value += c;
         i++;
       }
-      const tok: Omit<Token, 'precededBySpace'> = { type: 'quoted', text: input.slice(start, i), value, start, end: i };
+      const tok: Omit<Token, 'precededBySpace'> = {
+        type: 'quoted',
+        text: input.slice(start, i),
+        value,
+        start,
+        end: i,
+      };
       if (!closed) tok.unterminated = true;
       push(tok);
       continue;
@@ -131,7 +128,13 @@ export function tokenize(input: string): Token[] {
       i++;
     }
     segments.push(current);
-    const tok: Omit<Token, 'precededBySpace'> = { type: 'term', text: input.slice(start, i), value, start, end: i };
+    const tok: Omit<Token, 'precededBySpace'> = {
+      type: 'term',
+      text: input.slice(start, i),
+      value,
+      start,
+      end: i,
+    };
     if (sawWildcard) tok.wildcardSegments = segments;
     push(tok);
   }

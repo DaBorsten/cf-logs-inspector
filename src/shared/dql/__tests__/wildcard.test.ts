@@ -1,4 +1,10 @@
-import { segmentsToRegExp, segmentsToLike, containsToLike, escapeLike, globToRegExp } from '../wildcard';
+import {
+  segmentsToRegExp,
+  segmentsToLike,
+  containsToLike,
+  escapeLike,
+  globToRegExp,
+} from '../wildcard';
 
 /** Minimal LIKE emulation (ESCAPE '\', case-insensitive) to prove regex and LIKE agree. */
 function like(value: string, pattern: string): boolean {

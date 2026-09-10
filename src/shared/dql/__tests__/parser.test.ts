@@ -6,15 +6,24 @@ const f = (name: string): { name: string; path: string[]; hasWildcard: boolean }
   path: name.split('.'),
   hasWildcard: name.includes('*'),
 });
-const lit = (raw: string, quoted = false): { raw: string; quoted: boolean; hasWildcard: boolean } => ({ raw, quoted, hasWildcard: false });
-const wild = (raw: string): { raw: string; quoted: boolean; hasWildcard: boolean; segments: string[] } => ({
+const lit = (
+  raw: string,
+  quoted = false,
+): { raw: string; quoted: boolean; hasWildcard: boolean } => ({ raw, quoted, hasWildcard: false });
+const wild = (
+  raw: string,
+): { raw: string; quoted: boolean; hasWildcard: boolean; segments: string[] } => ({
   raw,
   quoted: false,
   hasWildcard: true,
   segments: raw.split('*'),
 });
 const term = (raw: string, quoted = false): DqlNode => ({ type: 'term', value: lit(raw, quoted) });
-const match = (field: string, raw: string, quoted = false): DqlNode => ({ type: 'match', field: f(field), value: lit(raw, quoted) });
+const match = (field: string, raw: string, quoted = false): DqlNode => ({
+  type: 'match',
+  field: f(field),
+  value: lit(raw, quoted),
+});
 const and = (...children: DqlNode[]): DqlNode => ({ type: 'and', children });
 const or = (...children: DqlNode[]): DqlNode => ({ type: 'or', children });
 const not = (child: DqlNode): DqlNode => ({ type: 'not', child });
@@ -43,7 +52,13 @@ describe('parse – valid queries', () => {
     ['a or b or c', or(term('a'), term('b'), term('c'))],
     ['not not a', not(not(term('a')))],
     ['correlation_id:*', { type: 'exists', field: f('correlation_id') }],
-    ['correlation_id:* and not tenant_id:*', and({ type: 'exists', field: f('correlation_id') }, not({ type: 'exists', field: f('tenant_id') }))],
+    [
+      'correlation_id:* and not tenant_id:*',
+      and(
+        { type: 'exists', field: f('correlation_id') },
+        not({ type: 'exists', field: f('tenant_id') }),
+      ),
+    ],
     ['status>=500', { type: 'range', field: f('status'), op: '>=', value: lit('500') }],
     ['status:>=500', { type: 'range', field: f('status'), op: '>=', value: lit('500') }],
     ['status<600', { type: 'range', field: f('status'), op: '<', value: lit('600') }],
@@ -54,20 +69,39 @@ describe('parse – valid queries', () => {
     ['level:(ERROR or WARN)', or(match('level', 'ERROR'), match('level', 'WARN'))],
     ['level:(ERROR WARN)', and(match('level', 'ERROR'), match('level', 'WARN'))],
     ['level:(a and not b)', and(match('level', 'a'), not(match('level', 'b')))],
-    ['level:((a or b) and c)', and(or(match('level', 'a'), match('level', 'b')), match('level', 'c'))],
-    ['bytes:(>100 and <200)', and({ type: 'range', field: f('bytes'), op: '>', value: lit('100') }, { type: 'range', field: f('bytes'), op: '<', value: lit('200') })],
+    [
+      'level:((a or b) and c)',
+      and(or(match('level', 'a'), match('level', 'b')), match('level', 'c')),
+    ],
+    [
+      'bytes:(>100 and <200)',
+      and(
+        { type: 'range', field: f('bytes'), op: '>', value: lit('100') },
+        { type: 'range', field: f('bytes'), op: '<', value: lit('200') },
+      ),
+    ],
     ['tags:(* or x)', or({ type: 'exists', field: f('tags') }, match('tags', 'x'))],
     [
       'level:(ERROR or WARN) and not logger:com.sap.*',
-      and(or(match('level', 'ERROR'), match('level', 'WARN')), not({ type: 'match', field: f('logger'), value: wild('com.sap.*') })),
+      and(
+        or(match('level', 'ERROR'), match('level', 'WARN')),
+        not({ type: 'match', field: f('logger'), value: wild('com.sap.*') }),
+      ),
     ],
     [
       'message:"connection refused" and status>=500 and status<600',
-      and(match('message', 'connection refused', true), { type: 'range', field: f('status'), op: '>=', value: lit('500') }, { type: 'range', field: f('status'), op: '<', value: lit('600') }),
+      and(
+        match('message', 'connection refused', true),
+        { type: 'range', field: f('status'), op: '>=', value: lit('500') },
+        { type: 'range', field: f('status'), op: '<', value: lit('600') },
+      ),
     ],
     ['url:http\\://x/y', match('url', 'http://x/y')],
     ['url:http://x/y', match('url', 'http://x/y')],
-    ['ts>=2026-01-01T00:00:00Z', { type: 'range', field: f('ts'), op: '>=', value: lit('2026-01-01T00:00:00Z') }],
+    [
+      'ts>=2026-01-01T00:00:00Z',
+      { type: 'range', field: f('ts'), op: '>=', value: lit('2026-01-01T00:00:00Z') },
+    ],
     ['a:b:c', match('a', 'b:c')],
     ['a:b:c d', and(match('a', 'b:c'), term('d'))],
     ['g:com.*:x*', { type: 'match', field: f('g'), value: wild('com.*:x*') }],

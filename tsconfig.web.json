@@ -1,5 +1,10 @@
 {
   "extends": "./tsconfig.base.json",
   "include": ["src/renderer/**/*", "src/shared/**/*", "src/preload/*.d.ts"],
-  "compilerOptions": { "composite": true, "jsx": "react-jsx", "lib": ["ES2023", "DOM", "DOM.Iterable"], "types": ["vitest/globals"] }
+  "compilerOptions": {
+    "composite": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vitest/globals"]
+  }
 }

@@ -29,10 +29,10 @@ describe('evaluate', () => {
     'level:error',
     'level:(ERROR or WARN)',
     'not level:WARN',
-    'message:refused',            // text field: substring
+    'message:refused', // text field: substring
     'message:"connection refused"',
-    'refused',                    // free text
-    'refused db-host',            // implicit and
+    'refused', // free text
+    'refused db-host', // implicit and
     '"db-host:5432"',
     'logger:com.sap.*',
     'logger:*Orders',
@@ -69,7 +69,7 @@ describe('evaluate', () => {
   it.each(truthy)('matches: %s', (q) => expect(m(q)).toBe(true));
 
   const falsy: string[] = [
-    'level:ERR',                 // keyword: exact, not substring
+    'level:ERR', // keyword: exact, not substring
     'level:WARN',
     'not level:ERROR',
     'message:"refused connection"',
@@ -81,10 +81,10 @@ describe('evaluate', () => {
     'nil:*',
     'tenant_id:*',
     'tags:pro',
-    'labels:acme',               // object never matches
+    'labels:acme', // object never matches
     'labels.*:zzz',
     'timestamp>2026-09-11',
-    'msg:a.b*',                  // regex meta escaped
+    'msg:a.b*', // regex meta escaped
     'unknown:x',
     'unknown>1',
   ];
@@ -109,7 +109,13 @@ describe('evaluate', () => {
   it('respects custom textFields', () => {
     const ast = parseOrThrow('trace');
     expect(evaluate(ast, { message: 'x', stacktrace: 'stack trace' })).toBe(false);
-    expect(evaluate(ast, { message: 'x', stacktrace: 'stack trace' }, { textFields: ['message', 'stacktrace'] })).toBe(true);
+    expect(
+      evaluate(
+        ast,
+        { message: 'x', stacktrace: 'stack trace' },
+        { textFields: ['message', 'stacktrace'] },
+      ),
+    ).toBe(true);
   });
 
   it('compileMatcher is reusable', () => {
@@ -121,7 +127,12 @@ describe('evaluate', () => {
 
 describe('collectHighlightTerms', () => {
   it('collects only positive literals', () => {
-    const terms = collectHighlightTerms(parseOrThrow('refused and level:ERROR and not logger:foo or not (x and y)'));
-    expect(terms.map((t) => `${t.field ?? ''}=${t.literal.raw}`)).toEqual(['=refused', 'level=ERROR']);
+    const terms = collectHighlightTerms(
+      parseOrThrow('refused and level:ERROR and not logger:foo or not (x and y)'),
+    );
+    expect(terms.map((t) => `${t.field ?? ''}=${t.literal.raw}`)).toEqual([
+      '=refused',
+      'level=ERROR',
+    ]);
   });
 });
