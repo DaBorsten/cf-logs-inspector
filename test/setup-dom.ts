@@ -4,8 +4,12 @@
  * that jsdom lacks. Safe to load in the node environment too (guards on `window`).
  */
 import '@testing-library/jest-dom/vitest';
+import { configure } from '@testing-library/react';
 
 if (typeof window !== 'undefined') {
+  // Component tests wait on mock IPC round trips and query invalidation; the default 1 s budget for
+  // waitFor/findBy* is occasionally exceeded on a loaded machine (seen once alongside a production build).
+  configure({ asyncUtilTimeout: 4000 });
   const proto = window.Element.prototype as unknown as Record<string, unknown>;
   if (!proto['scrollIntoView']) proto['scrollIntoView'] = () => {};
   if (!proto['hasPointerCapture']) proto['hasPointerCapture'] = () => false;
