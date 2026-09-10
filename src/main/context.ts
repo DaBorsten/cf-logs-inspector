@@ -1,8 +1,12 @@
 import type { ConnectionManager } from './cf/connection-manager';
+import type { WorkspaceManager } from './db/workspace-manager';
+import type { StreamManager } from './ingest/stream-manager';
 import type { Logger } from './log';
 
 /** Long-lived services shared by IPC handlers. Created once in `index.ts` after `app.whenReady()`. */
 export interface AppContext {
   connections: ConnectionManager;
+  workspaces: WorkspaceManager;
+  streams: StreamManager;
   logger: Logger;
 }

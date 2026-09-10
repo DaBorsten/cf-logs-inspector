@@ -11,6 +11,14 @@ import type {
   PasscodeStartResult,
 } from '../model/connection';
 import type { CfApp, CfEndpoints, CfOrg, CfSpace } from '../model/cf';
+import type {
+  LogSession,
+  SessionCreateInput,
+  SessionStartInput,
+  StreamBatchEvent,
+  StreamStatusEvent,
+} from '../model/session';
+import type { WorkspaceInfo, WorkspaceStats } from '../model/workspace';
 
 export interface IpcError {
   code: string;
@@ -56,6 +64,30 @@ export interface IpcContracts {
   'cf:orgs': { req: { connectionId: string }; res: CfOrg[] };
   'cf:spaces': { req: { connectionId: string; orgGuid: string }; res: CfSpace[] };
   'cf:apps': { req: { connectionId: string; spaceGuid: string }; res: CfApp[] };
+
+  // ---- workspaces (M4) ----
+  'workspace:list': { req: void; res: WorkspaceInfo[] };
+  /** Creates the file and switches to it. */
+  'workspace:create': { req: { name: string }; res: WorkspaceInfo };
+  /** Switches to a registered workspace (stops all streams first). */
+  'workspace:open': { req: { id: string }; res: WorkspaceInfo };
+  /** Registers an existing .sqlite file and switches to it. */
+  'workspace:openFile': { req: { path: string }; res: WorkspaceInfo };
+  'workspace:delete': { req: { id: string }; res: void };
+  'workspace:current': { req: void; res: WorkspaceInfo | null };
+  'workspace:stats': { req: void; res: WorkspaceStats };
+  'workspace:kvGet': { req: { key: string }; res: string | null };
+  'workspace:kvSet': { req: { key: string; value: string | null }; res: void };
+
+  // ---- log sessions / streams (M4) ----
+  'session:list': { req: void; res: LogSession[] };
+  'session:create': { req: SessionCreateInput; res: LogSession };
+  'session:start': { req: SessionStartInput; res: LogSession };
+  'session:stop': { req: { sessionId: number }; res: LogSession };
+  'session:setInterval': { req: { sessionId: number; pollIntervalMs: number }; res: LogSession };
+  /** Deletes the session's entries (stops it first); the session stays. */
+  'session:clear': { req: { sessionId: number }; res: LogSession };
+  'session:delete': { req: { sessionId: number }; res: void };
 }
 
 export const INVOKE_CHANNELS = [
@@ -73,18 +105,41 @@ export const INVOKE_CHANNELS = [
   'cf:orgs',
   'cf:spaces',
   'cf:apps',
+  'workspace:list',
+  'workspace:create',
+  'workspace:open',
+  'workspace:openFile',
+  'workspace:delete',
+  'workspace:current',
+  'workspace:stats',
+  'workspace:kvGet',
+  'workspace:kvSet',
+  'session:list',
+  'session:create',
+  'session:start',
+  'session:stop',
+  'session:setInterval',
+  'session:clear',
+  'session:delete',
 ] as const satisfies readonly (keyof IpcContracts)[];
 
 export interface PushEvents {
-  'workspace:changed': { id: string };
+  /** The open workspace changed (`id: null` while none is open). */
+  'workspace:changed': { id: string | null };
   /** Token refresh failed or no token exists; the renderer should prompt for login. */
   'auth:required': { connectionId: string; reason: AuthRequiredReason };
   /** Login, refresh or logout changed the auth state of a connection. */
   'auth:changed': { connectionId: string; status: AuthStatus };
+  /** A writer flush committed rows for a session (counts only; re-query to see them). */
+  'stream:batch': StreamBatchEvent;
+  /** A session's poller changed state. */
+  'stream:status': StreamStatusEvent;
 }
 
 export const PUSH_EVENTS = [
   'workspace:changed',
   'auth:required',
   'auth:changed',
+  'stream:batch',
+  'stream:status',
 ] as const satisfies readonly (keyof PushEvents)[];

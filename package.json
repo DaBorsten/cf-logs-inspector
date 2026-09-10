@@ -14,12 +14,13 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "node scripts/test.mjs",
+    "test:watch": "node scripts/test.mjs watch",
     "lint": "eslint .",
     "format": "prettier --write .",
     "postinstall": "electron-builder install-app-deps",
-    "package": "electron-vite build && electron-builder"
+    "package": "electron-vite build && electron-builder",
+    "test:node": "vitest run"
   },
   "dependencies": {
     "better-sqlite3": "^12.8.0",

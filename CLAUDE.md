@@ -35,8 +35,9 @@ deliberately does not depend on the `cf` CLI.
 | M1 shared DQL package | done: 220 vitest tests pass, typecheck and lint clean, `electron-vite build` succeeds |
 | M2 auth + CF client | done (2026-09-10, Windows session): discovery, undici http with TLS options, UAA grants + TokenManager, passcode window, CC v3 orgs/spaces/apps, connection store, IPC `connection:*`/`auth:*`/`cf:*`; 336 tests, typecheck/lint/build clean. Not yet exercised against a real foundation. |
 | M3 Log Cache streaming | done (2026-09-10): `LogCacheClient.read`, `LogPoller` (recent backfill, forward tail with overlap dedupe, immediate re-read on full page, backoff + Retry-After, auth pause/resume, abort), mock Log Cache route; 361 tests, typecheck/lint/build clean. Not yet exercised against a real foundation. |
-| M4 storage | **next** |
-| M5 query engine, M6+ UI | not started |
+| M4 storage | done (2026-09-10): WorkspaceManager (registry + one open SQLite file, WAL, migrations), schema v1, envelope parser, batched Writer with retention, StreamManager (sessions <-> pollers), IPC `workspace:*`/`session:*`, push `stream:batch`/`stream:status`; 440 tests. |
+| M5 query engine | **next** |
+| M6+ UI | not started |
 
 `pnpm dev` was verified on Windows on 2026-09-10 (window shows the placeholder with the app version). The M2
 code has only been tested against the in-process mock (`test/fixtures/mock-cf.ts`); the first real-foundation
@@ -65,7 +66,16 @@ src/main/ipc/handle.ts        `handle(channel, zodSchema | undefined, fn)` -> Ip
 src/main/ipc/push.ts          pushEvent(event, payload) to all windows
 src/main/ipc/schemas.ts       zod request schemas per channel
 src/main/ipc/register.ts      app:version, entries:validateDql + calls the domain registrations below
-src/main/ipc/*.handlers.ts    connection.handlers, auth.handlers (passcode window), cf.handlers
+src/main/ipc/*.handlers.ts    connection, auth (passcode window), cf, workspace, session handlers
+src/main/db/schema.ts         MIGRATIONS[] (user_version steps), applyPragmas, migrate
+src/main/db/workspace-manager.ts WorkspaceManager: registry (workspaces.json), create/openById/openFile/delete/openLastOrDefault, db(), stats, kv, onBeforeClose hooks
+src/main/db/repos/sessions.ts log_sessions CRUD, recordBatch, recountSessions, clearSessionData
+src/main/db/repos/entries.ts  insertEntries (INSERT OR IGNORE, BigInt ts), retention deletes, session_props upsert/list, prepared() cache
+src/main/ingest/parser.ts     parseEnvelope -> ParsedEntry (message/level/props/dedupeKey), normalizeLevel, levelFromText
+src/main/ingest/writer.ts     Writer: batched transaction (250 ms / 500 rows), props, retention, stream:batch events
+src/main/ingest/stream-manager.ts StreamManager: sessions <-> LogPoller, start/stop/setInterval/clear/delete/stopAll, handleAuthChanged
+src/main/store/json-file.ts   readJsonFile(path, zodSchema, fallback) with corrupt-file backup, writeJsonAtomic
+scripts/test.mjs              runs vitest under Electron's Node (ELECTRON_RUN_AS_NODE) so better-sqlite3 loads
 src/main/cf/errors.ts         CfError hierarchy + httpStatusError / mapNetworkError / describeErrorBody
 src/main/cf/http.ts           HttpClient over undici Agent (skipSslValidation, caCertPem, timeouts), json(req, zodSchema)
 src/main/cf/discovery.ts      normalizeApiUrl, discoverEndpoints, guessLogCacheUrl
@@ -83,6 +93,9 @@ src/shared/ipc/contracts.ts   IpcContracts, INVOKE_CHANNELS, PushEvents, PUSH_EV
 src/shared/model/connection.ts ConnectionInput/Profile, AuthMode, AuthStatus, PasscodeStartResult
 src/shared/model/cf.ts        CfEndpoints, CfOrg, CfSpace, CfApp
 src/shared/model/log.ts       LogEnvelope (timestampNs string, sourceId, instanceId, appName?, sourceType?, stream, payload, tags)
+src/shared/model/log-entry.ts ParsedEntry (stored row shape), LEVELS
+src/shared/model/session.ts   LogSession, SessionStatus, SessionCreateInput, StreamBatchEvent, StreamStatusEvent, POLL_INTERVALS_MS
+src/shared/model/workspace.ts WorkspaceInfo, WorkspaceStats, RetentionSettings, DEFAULT_RETENTION
 src/shared/regions.ts         BTP_REGIONS catalogue, btpApiUrl(region), btpRegionFromApiUrl(url)
 src/shared/dql/               ast, errors, tokenizer, parser, evaluator, wildcard, cursor, stringify, index + __tests__
 src/renderer/src/App.tsx      placeholder UI
@@ -100,6 +113,14 @@ test/fixtures/tls/            self-signed localhost cert/key for TLS option test
   Over IPC they travel as strings.
 - Tests are table-driven (`it.each`) and live next to the code in `__tests__`. Run `pnpm test`, `pnpm typecheck`,
   `pnpm lint` before committing; all three were clean at the last commit.
+- `pnpm test` runs vitest inside Electron's Node (`scripts/test.mjs`, `ELECTRON_RUN_AS_NODE=1`) so the
+  Electron-built `better-sqlite3` binary loads; `pnpm test:node` is plain vitest and only works while the
+  binary happens to be ABI-compatible with the system Node. If `better-sqlite3` fails to load in the app,
+  run `pnpm exec electron-rebuild -f -w better-sqlite3` (the `postinstall` `install-app-deps` step did not
+  replace the Node prebuild on Windows/pnpm on 2026-09-10).
+- SQLite integers: `ts_ns` is INTEGER; bind it as `BigInt` and read it back with `CAST(ts_ns AS TEXT)` (or
+  `stmt.safeIntegers()`), never as a JS number. `INSERT OR IGNORE` also swallows NOT NULL/CHECK conflicts, so
+  keep entries valid before insert; foreign-key violations still abort the flush.
 - Commit messages end with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` when Claude wrote the change.
 - Formatting: prettier, single quotes, width 100, trailing commas (`.prettierrc`). All files are formatted since
   the M2 commit; run `pnpm format` before committing.
@@ -185,21 +206,47 @@ test/fixtures/tls/            self-signed localhost cert/key for TLS option test
   so real HTTP to the mock keeps working. Mock knobs: `state.logs`, `addLogs(sourceId, messages, startNs, stepNs)`,
   `logCacheLimitCap`, `failLogCache` (queue), `scrambleLogCache`.
 
-## Next milestone: M4 storage (see plan sections "SQLite schema", "Ingest pipeline")
+## M4 storage: how it works (done)
 
-Create `src/main/db/workspace-manager.ts` (workspace files under `<userData>/workspaces/<slug>-<id>.sqlite`,
-WAL, `synchronous=NORMAL`, `user_version` migrations, one open at a time, `workspace:*` IPC),
-`src/main/db/schema.ts` (tables from the plan), `src/main/ingest/parser.ts` (LogEnvelope -> parsed entry:
-message/level from JSON `msg|message|text` and `level|severity|lvl`, `props` = top-level JSON keys, `dedupeKey`),
-`src/main/ingest/writer.ts` (per-workspace batched transaction every 250 ms or 500 entries, `INSERT OR IGNORE`,
-upsert `session_props`, update `log_sessions` counts/`last_ts_ns`, backpressure > 20k queued, emit
-`stream:batch {sessionId, inserted, totalCount, latestId}`), `src/main/ingest/stream-manager.ts`
-(`Map<sessionId, {poller, status}>`, start/stop, resume from `last_ts_ns`, stop all on workspace switch, resume
-pollers on `auth:changed` loggedIn, `stream:status` events) and the `session:*` IPC channels. better-sqlite3 is
-already a dependency and rebuilt for Electron by `postinstall`; vitest tests can use it with plain Node only if
-the native module matches the Node ABI, so run DB tests against a temp file with the Node build or via
-`electron-vite`'s vitest setup (check `pnpm test` first; if it fails on the .node binary, use
-`npx @electron/rebuild -f -w better-sqlite3` before/after tests or keep two installs).
+- `WorkspaceManager` keeps a registry (`<userData>/workspaces.json`: id, name, path, createdAt, lastOpenedAt,
+  lastOpenId) and exactly one open `better-sqlite3` connection. Files live at
+  `<userData>/workspaces/<slug>-<id8>.sqlite`; `openFile` registers arbitrary paths. Opening applies pragmas
+  (WAL, synchronous=NORMAL, foreign_keys=ON), runs `migrate`, and resets every `log_sessions.status` to
+  `stopped`. Switching/closing runs `onBeforeClose` hooks first; `StreamManager` registers `stopAll()` there.
+  `index.ts` calls `openLastOrDefault()` at startup (creates `default` on first run) and emits
+  `workspace:changed {id | null}`.
+- `parseEnvelope`: trims trailing newlines, JSON object payloads -> `message` from `msg|message|text|log`,
+  `level` from `level|severity|lvl|loglevel|log_level|levelname` (words or pino numbers) else a heuristic on
+  the text (`levelFromText`, first 64 chars), `props` = the whole parsed object; plain text -> heuristic level,
+  `props = null`. `dedupeKey = ts:appGuid:instance:stream:sha1(raw)[0..16]` (app name changes do not dupe).
+- `Writer` (one per open workspace, owned by `StreamManager`): `enqueue(sessionId, entries)` resolves after
+  the transaction that stored them; flush at 500 queued rows or after 250 ms. Per flush and session:
+  `INSERT OR IGNORE`, `recordBatch` (entry_count, monotonic `last_ts_ns`), `session_props` upsert
+  (type/count/sample, `mixed` on type conflicts), per-session retention (oldest rows beyond
+  `maxRowsPerSession`), then workspace-wide retention (`SUM(entry_count)` vs `maxRowsWorkspace`, recount
+  affected sessions), then `stream:batch {sessionId, inserted, totalCount, latestId}`. A failing flush rejects
+  the awaiting pollers, which back off and re-deliver.
+- `StreamManager.start(sessionId, recent)` builds a `LogPoller` from the connection runtime's `logCache`;
+  without `recent` it resumes from `last_ts_ns + 1`. Poller status maps to `SessionStatus`
+  (`running|backoff|paused-auth|stopped`), is persisted to `log_sessions.status` on transitions and pushed as
+  `stream:status`. `setInterval` restarts a running poller; `clear` stops and wipes entries + props;
+  `handleAuthChanged(connectionId, {loggedIn:true})` resumes paused pollers (wired in `index.ts`).
+- Retention defaults: 500k rows per session, 2M per workspace (`DEFAULT_RETENTION`); not yet user-configurable
+  (M12 settings UI; store in `kv` when that lands).
+
+## Next milestone: M5 query engine (see plan section "SQL compilation" and the `EntryQuery` contract)
+
+Create `src/main/db/query-compiler.ts` (DQL AST -> SQL: fixed field allowlist `ts|timestamp -> ts_ns`,
+`app -> app_name`, `source_type`, `instance`, `stream`, `level`, `message`, `session -> session_id`; dynamic
+names `/^[A-Za-z_@][\w-]*(\.[A-Za-z_@][\w-]*)*$/` -> `json_extract(props, ?)` with bound `$.path`; `LIKE ? ESCAPE '\'`
+via `segmentsToLike`/`containsToLike` from `src/shared/dql/wildcard.ts`; numeric compare through
+`CAST(.. AS REAL)` guarded by `json_type`; `exists` -> `IS NOT NULL`; base predicate
+`session_id IN (...) AND ts_ns BETWEEN ? AND ?` first; allowlisted sort keys with `id` tiebreaker; prepared
+statement LRU), `src/main/db/repos/entries.ts` additions (`query`, `count {total, maxId}`, `get(id)`, `values(field)`
+for autocomplete), `props:list` from `listProps`, time filter resolution (relative -> absolute ns in main),
+snapshot paging (`id <= snapshotId`), and IPC `entries:{query,count,get,values}` + `props:list`. Test SQL vs
+`evaluate()` equivalence on fixtures in a temp database (both must agree on the DQL semantics listed above,
+including `textFields = ['message']` substring vs keyword exact match and range typing).
 
 ## Platform notes
 

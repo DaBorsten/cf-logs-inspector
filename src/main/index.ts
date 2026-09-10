@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import log from 'electron-log/main';
 import { ConnectionManager } from './cf/connection-manager';
 import type { AppContext } from './context';
+import { WorkspaceManager } from './db/workspace-manager';
+import { StreamManager } from './ingest/stream-manager';
 import { registerIpcHandlers } from './ipc/register';
 import { pushEvent } from './ipc/push';
 import { ConnectionStore } from './store/connections';
@@ -59,29 +61,52 @@ function installCsp(): void {
   });
 }
 
-function createContext(): AppContext {
-  const logger = log.scope('cf');
+async function createContext(): Promise<AppContext> {
+  const logger = log.scope('main');
+  const userData = app.getPath('userData');
+
   const store = new ConnectionStore({
-    filePath: join(app.getPath('userData'), 'connections.json'),
+    filePath: join(userData, 'connections.json'),
     encryptor: safeStorageEncryptor(logger),
     logger,
+  });
+  const workspaces = new WorkspaceManager({
+    dir: join(userData, 'workspaces'),
+    registryPath: join(userData, 'workspaces.json'),
+    logger,
+    onChange: (ws) => pushEvent('workspace:changed', { id: ws?.id ?? null }),
   });
   const connections = new ConnectionManager({
     store,
     logger,
     onAuthRequired: (connectionId, reason) => pushEvent('auth:required', { connectionId, reason }),
-    onAuthChanged: (connectionId, status) => pushEvent('auth:changed', { connectionId, status }),
+    onAuthChanged: (connectionId, status) => {
+      pushEvent('auth:changed', { connectionId, status });
+      streams.handleAuthChanged(connectionId, status); // fires asynchronously, after `streams` exists
+    },
   });
-  return { connections, logger };
+  const streams = new StreamManager({
+    workspaces,
+    connections,
+    logger,
+    onBatch: (ev) => pushEvent('stream:batch', ev),
+    onStatus: (ev) => pushEvent('stream:status', ev),
+  });
+  try {
+    await workspaces.openLastOrDefault();
+  } catch (err) {
+    logger.error(`could not open a workspace at startup: ${String(err)}`);
+  }
+  return { connections, workspaces, streams, logger };
 }
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   let ctx: AppContext | undefined;
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     installCsp();
-    ctx = createContext();
+    ctx = await createContext();
     registerIpcHandlers(ctx);
     createMainWindow();
     app.on('activate', () => {
@@ -93,7 +118,22 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform !== 'darwin') app.quit();
   });
 
-  app.on('before-quit', () => {
-    void ctx?.connections.disposeAll();
+  let shuttingDown = false;
+  app.on('before-quit', (event) => {
+    if (!ctx || shuttingDown) return;
+    shuttingDown = true;
+    event.preventDefault();
+    const c = ctx;
+    void (async () => {
+      try {
+        await c.streams.stopAll();
+        await c.workspaces.close();
+        await c.connections.disposeAll();
+      } catch (err) {
+        c.logger.error(`shutdown error: ${String(err)}`);
+      } finally {
+        app.quit();
+      }
+    })();
   });
 }
