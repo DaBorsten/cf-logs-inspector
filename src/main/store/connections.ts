@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { readFileSync, renameSync } from 'node:fs';
 import { z } from 'zod';
 import type { ConnectionInput, ConnectionProfile } from '@shared/model/connection';
 import { InvalidInputError } from '../cf/errors';
 import { MemoryTokenStore, type TokenSet, type TokenStore } from '../cf/uaa';
 import { noopLogger, type Logger } from '../log';
+import { writeJsonAtomic } from './json-file';
 
 /** Symmetric encryption for secrets at rest. Production uses Electron `safeStorage` (see safe-storage.ts). */
 export interface Encryptor {
@@ -187,10 +187,7 @@ export class ConnectionStore {
   }
 
   private persist(): void {
-    mkdirSync(dirname(this.filePath), { recursive: true });
-    const tmp = `${this.filePath}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(this.data, null, 2), 'utf8');
-    renameSync(tmp, this.filePath);
+    writeJsonAtomic(this.filePath, this.data);
   }
 }
 

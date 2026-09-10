@@ -41,8 +41,9 @@ deliberately does not depend on the `cf` CLI.
 | M7 streams panel | done (2026-09-10): connection/org/space pickers, app multi-select with filter, recent toggle, start (reuse existing session per app), stream list with stop/resume, poll interval, clear/delete, login shortcut; 603 tests. End-to-end against a real foundation still pending. |
 | M8 log table core | done (2026-09-10): virtualized TanStack table with snapshot paging, new-entries banner, header sort, column resize, column picker (fixed + dynamic props, reorder) persisted per workspace in kv, Local/UTC toggle, plain-text DQL input with live validation; 611 tests. |
 | M9 query bar (CodeMirror) | done (2026-09-10): CodeMirror 6 single-line DQL editor with token highlighting, lint squiggles, field/value/operator autocomplete (`entries:values`), Enter/Escape, query history (kv `query.history`), saved filters (`saved_filters` table + `filters:*` IPC); 649 tests. |
-| M10 time filter + auto refresh + tail | **next** |
-| M11+ UI | not started |
+| M10 time filter + auto refresh + tail | done (2026-09-10): time range chip/panel (quick picks, custom relative, absolute in local/UTC, all time), auto refresh interval (off/1/2/5/10/30 s), tail mode with pause on scroll/hover/resize, refresh re-runs pages; 657 tests. |
+| M11 detail + interaction | **next** |
+| M12+ | not started |
 
 `pnpm dev` was verified on Windows on 2026-09-10 (window shows the placeholder with the app version). The M2
 code has only been tested against the in-process mock (`test/fixtures/mock-cf.ts`); the first real-foundation
@@ -115,8 +116,9 @@ src/renderer/src/features/streams/     StreamsPanel (guards) -> StreamPicker (co
 src/renderer/src/queries/cf.ts         useOrgs/useSpaces/useApps (enabled only while logged in)
 src/renderer/src/queries/sessions.ts   useSessions + useStartStreams (create-or-reuse + start per app), start/stop/setInterval/clear/delete mutations
 src/renderer/src/lib/colors.ts         appHue/appColor: deterministic colour tag per app name
-src/renderer/src/lib/time.ts           formatTimestamp(tsNs, 'local'|'utc'), tsNsToDate, subMillisDigits
-src/renderer/src/store/query.ts        committed dql, sort (toggleSort cycles asc/desc/default), sessionIds, time, tz
+src/renderer/src/lib/time.ts           formatTimestamp, formatMinute, msToDateTimeInput/dateTimeInputToMs (datetime-local in local|utc), describeTimeFilter
+src/renderer/src/store/query.ts        committed dql, sort (toggleSort cycles asc/desc/default), sessionIds, time, tz, refreshIntervalMs (REFRESH_INTERVALS_MS), tail
+src/renderer/src/features/time-filter/TimeFilterControl.tsx chip + panel writing useQueryStore.time (QUICK_PICKS, relative form, absolute form)
 src/renderer/src/features/log-table/   LogView (QueryInput + LogTable), LogTable (virtualized grid), columns.tsx (fixed + p:<key> defs, layout types), useEntries.ts (snapshot/pages/props hooks), useColumnLayout.ts (kv-persisted layout), ColumnPicker
 src/renderer/src/features/query-bar/ QueryBar (editor + Apply + history/saved-filter panels), QueryEditor (CodeMirror wrapper), dql-language.ts (classifyTokens/dqlHighlight, dqlDiagnostics/dqlLint, completionOptions/dqlCompletionSource, singleLine, dqlTheme)
 src/renderer/src/queries/kv.ts         useKvJson(key, fallback) -> {value, set} per open workspace
@@ -406,18 +408,35 @@ test/fixtures/tls/            self-signed localhost cert/key for TLS option test
   `userEvent.type` on contenteditable is unreliable; `test/setup-dom.ts` polyfills `Range#getClientRects` /
   `getBoundingClientRect` and `Element#getClientRects` for CodeMirror's measurements.
 
-## Next milestone: M10 time filter + auto refresh + tail (see plan section "Renderer" -> Time filter / Auto refresh)
+## M10 time filter + auto refresh + tail: how it works (done)
 
-Add `features/time-filter/TimeFilterPopover.tsx` next to the query bar: quick picks (5m, 15m, 1h, 6h, 24h,
-7d -> `{kind:'relative'}`), relative N m/h/d inputs, absolute from/to with `datetime-local` inputs (store ms,
-respect `tz`), "All time" clears; chip showing the active range; write to `useQueryStore.time` (already part of
-`EntryScope`, resolved in main per query). Auto refresh control in the table toolbar (Off/1/2/5/10/30 s,
-persist in `useQueryStore`): on tick call `snapshot.refresh()` when `newCount > 0`; tail mode toggle: keep the
-scroll at the top (newest first) and auto-apply new entries, pausing while the user scrolls away from the top,
-hovers a row, drags a resize handle or has a dialog open; resume when back at the top. Relative time filters
-must re-resolve on refresh (they do: main resolves against `Date.now()` per query, and the snapshot refetch
-re-runs the count). Consider showing "live" state in the status bar. Tests: time filter popover writes the
-expected `TimeFilter`; auto refresh with vi.useFakeTimers + mock `stream:batch`; tail pauses on scroll.
+- `TimeFilterControl` (in the query bar row) shows `describeTimeFilter(time, tz)` on a chip and opens a panel
+  with quick picks (`QUICK_PICKS`: 5 min .. 7 d as relative filters), a custom relative form (integer amount +
+  unit), an absolute form (`datetime-local` inputs interpreted in the current `tz` via `dateTimeInputToMs`,
+  start must precede end, either side optional) and "All time". Writes `useQueryStore.time`; main resolves
+  relative windows against `Date.now()` on every query.
+- Auto refresh: `refreshIntervalMs` (persisted; `REFRESH_INTERVALS_MS`, 0 = off) drives a `setInterval` in
+  `LogTable` that calls `snapshot.refresh()` when `newCount > 0` or the time filter is relative (sliding window).
+- Tail: `tail` (persisted) applies `snapshot.refresh()` whenever `newCount > 0` unless paused; paused while
+  `scrollTop > 4`, the pointer is over the rows, or a column is being resized (`columnSizingInfo`). A badge
+  shows `Live` / `Tail paused`. Refresh now also invalidates the in-snapshot count and pages for the scope, so
+  unchanged snapshot ids still re-run the rows (needed for relative windows and cleared sessions).
+- Tests use short real intervals (store set to 60 ms) rather than fake timers because TanStack Query and RTL
+  `waitFor` do not mix well with `vi.useFakeTimers`.
+
+## Next milestone: M11 detail + interaction (see plan section "Renderer" -> Log table / Detail)
+
+Row selection (click, Shift/Ctrl for ranges/multi, keyboard Up/Down/Home/End/PageUp/PageDown with the
+virtualizer's `scrollToIndex`), a resizable `RowDetailPanel` below/right of the table showing the selected
+entry via `entries:get` (raw line, formatted JSON tree with expand/collapse, all fixed fields, copy buttons:
+raw / JSON / message), "filter for value" / "filter out value" actions on JSON leaves and cells that append
+`field:value` / `not field:value` to the committed DQL (use `stringify` semantics and `quoteValue`), Ctrl+C on
+selected rows copies NDJSON of `EntryDetail`s, rich cells (term highlight of positive literals from
+`collectHighlightTerms(parse(dql))` in the message column, stacktrace detection: newline-containing messages get
+a "multi-line" marker and show fully in the detail panel). Persist detail panel size in kv `layout.detail`.
+Keep tail paused while a row is selected? Decide: tail keeps running but selection is by entry id (rows shift
+but the selected row stays highlighted). Tests: selection model as pure functions, detail panel with the mock
+(`entries:get` returns `raw`), filter-for-value appends to the store.
 
 ## Platform notes
 

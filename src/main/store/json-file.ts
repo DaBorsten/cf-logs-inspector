@@ -35,5 +35,28 @@ export function writeJsonAtomic(path: string, data: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
-  renameSync(tmp, path);
+  renameWithRetry(tmp, path);
+}
+
+const RETRYABLE = new Set(['EPERM', 'EBUSY', 'EACCES', 'ENOTEMPTY']);
+
+/**
+ * `renameSync` with a few short retries: on Windows a just-written file can be transiently locked by
+ * the indexer or antivirus, which surfaces as EPERM/EBUSY on the rename.
+ */
+export function renameWithRetry(from: string, to: string, attempts = 6): void {
+  for (let i = 0; ; i++) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (i >= attempts - 1 || !code || !RETRYABLE.has(code)) throw err;
+      sleepSync(10 * (i + 1));
+    }
+  }
+}
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }

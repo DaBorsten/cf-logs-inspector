@@ -3,6 +3,9 @@ import { persist } from 'zustand/middleware';
 import { DEFAULT_SORT, type SortSpec, type TimeFilter } from '@shared/model/query';
 import type { TimeZoneMode } from '../lib/time';
 
+/** Auto refresh choices in ms; 0 = off. */
+export const REFRESH_INTERVALS_MS = [0, 1000, 2000, 5000, 10_000, 30_000] as const;
+
 interface QueryState {
   /** Committed DQL (what the table shows); the query bar edits a draft locally until submit. */
   dql: string;
@@ -18,6 +21,12 @@ interface QueryState {
   setTime(time: TimeFilter | undefined): void;
   tz: TimeZoneMode;
   setTz(tz: TimeZoneMode): void;
+  /** Periodic refresh (0 = off). Persisted. */
+  refreshIntervalMs: number;
+  setRefreshIntervalMs(ms: number): void;
+  /** Tail mode: apply new entries as they arrive while the view rests at the top. Persisted. */
+  tail: boolean;
+  setTail(tail: boolean): void;
 }
 
 export const useQueryStore = create<QueryState>()(
@@ -40,7 +49,14 @@ export const useQueryStore = create<QueryState>()(
       setTime: (time) => set({ time }),
       tz: 'local',
       setTz: (tz) => set({ tz }),
+      refreshIntervalMs: 0,
+      setRefreshIntervalMs: (refreshIntervalMs) => set({ refreshIntervalMs }),
+      tail: false,
+      setTail: (tail) => set({ tail }),
     }),
-    { name: 'cf-log-inspector.query', partialize: (s) => ({ tz: s.tz }) },
+    {
+      name: 'cf-log-inspector.query',
+      partialize: (s) => ({ tz: s.tz, refreshIntervalMs: s.refreshIntervalMs, tail: s.tail }),
+    },
   ),
 );

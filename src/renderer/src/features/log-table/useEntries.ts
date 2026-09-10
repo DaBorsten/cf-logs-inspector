@@ -1,5 +1,10 @@
 import * as React from 'react';
-import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import type { EntryCountQuery, EntryRow, SortSpec } from '@shared/model/query';
 import { invoke } from '../../api/client';
 import { qk } from '../../queries/keys';
@@ -60,10 +65,17 @@ export function useEntrySnapshot(scope: EntryScope) {
     placeholderData: keepPreviousData,
   });
 
+  const qc = useQueryClient();
   const refresh = React.useCallback(async () => {
     const result = await live.refetch();
     if (result.data) setSnapshot({ key, id: result.data.maxId });
-  }, [live, key]);
+    // Even with an unchanged snapshot id the rows can differ (relative time windows slide, sessions
+    // get cleared), so re-run the in-snapshot count and pages as well.
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: [...qk.entries, 'count', key], exact: false }),
+      qc.invalidateQueries({ queryKey: [...qk.entries, 'pages', key] }),
+    ]);
+  }, [live, key, qc]);
 
   const total = inSnapshot.data?.total ?? 0;
   const newCount =

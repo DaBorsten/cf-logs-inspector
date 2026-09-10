@@ -7,12 +7,14 @@ import {
   type SortingState,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown, ArrowUp, ArrowUpDown, Globe, RefreshCw } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Globe, Pause, Radio, RefreshCw } from 'lucide-react';
 import { errorMessage } from '../../api/client';
+import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
+import { NativeSelect } from '../../components/ui/input';
 import { EmptyState, Spinner } from '../../components/ui/misc';
 import { cn, formatCount } from '../../lib/utils';
-import { useQueryStore } from '../../store/query';
+import { REFRESH_INTERVALS_MS, useQueryStore } from '../../store/query';
 import { ColumnPicker } from './ColumnPicker';
 import { buildColumns, DEFAULT_PROP_SIZE, FIXED_COLUMNS, rowTintClass, sortKeyOf } from './columns';
 import { useColumnLayout } from './useColumnLayout';
@@ -28,6 +30,10 @@ export function LogTable(): React.JSX.Element {
   const time = useQueryStore((s) => s.time);
   const tz = useQueryStore((s) => s.tz);
   const setTz = useQueryStore((s) => s.setTz);
+  const refreshIntervalMs = useQueryStore((s) => s.refreshIntervalMs);
+  const setRefreshIntervalMs = useQueryStore((s) => s.setRefreshIntervalMs);
+  const tail = useQueryStore((s) => s.tail);
+  const setTail = useQueryStore((s) => s.setTail);
 
   const scope = React.useMemo<EntryScope>(() => {
     const s: EntryScope = { sort };
@@ -103,6 +109,30 @@ export function LogTable(): React.JSX.Element {
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, [snapshotId]);
 
+  // ---- auto refresh & tail ----
+  // Tail applies new entries as soon as they are counted, but pauses while the user is reading:
+  // scrolled away from the top, pointer over the rows, or dragging a column edge.
+  const [scrolledAway, setScrolledAway] = React.useState(false);
+  const [hovering, setHovering] = React.useState(false);
+  const resizing = Boolean(table.getState().columnSizingInfo.isResizingColumn);
+  const tailPaused = scrolledAway || hovering || resizing;
+  const latest = React.useRef({ refresh: snapshot.refresh, newCount: snapshot.newCount, time });
+  latest.current = { refresh: snapshot.refresh, newCount: snapshot.newCount, time };
+
+  React.useEffect(() => {
+    if (tail && !tailPaused && snapshot.newCount > 0) void snapshot.refresh();
+  }, [tail, tailPaused, snapshot.newCount, snapshot.refresh]);
+
+  React.useEffect(() => {
+    if (!refreshIntervalMs) return;
+    const id = setInterval(() => {
+      const { refresh, newCount, time: t } = latest.current;
+      // Relative windows move with the clock, so they refresh even without new rows.
+      if (newCount > 0 || t?.kind === 'relative') void refresh();
+    }, refreshIntervalMs);
+    return () => clearInterval(id);
+  }, [refreshIntervalMs]);
+
   const headerGroups = table.getHeaderGroups();
   const visibleLeaf = table.getVisibleLeafColumns();
   const gridTemplate = visibleLeaf.map((c) => `${c.getSize()}px`).join(' ');
@@ -126,7 +156,38 @@ export function LogTable(): React.JSX.Element {
             show
           </button>
         ) : null}
+        {tail ? (
+          <Badge
+            variant={tailPaused ? 'warning' : 'success'}
+            title={tailPaused ? 'Tail paused while you read' : 'Following new entries'}
+          >
+            {tailPaused ? 'Tail paused' : 'Live'}
+          </Badge>
+        ) : null}
         <span className="flex-1" />
+        <Button
+          size="sm"
+          variant={tail ? 'secondary' : 'ghost'}
+          onClick={() => setTail(!tail)}
+          aria-pressed={tail}
+          aria-label={tail ? 'Stop tailing' : 'Tail new entries'}
+          title={tail ? 'Stop tailing' : 'Tail: apply new entries automatically while at the top'}
+        >
+          {tail ? <Pause /> : <Radio />} Tail
+        </Button>
+        <NativeSelect
+          aria-label="Auto refresh"
+          title="Auto refresh interval"
+          className="h-7 w-auto py-0 pr-6 text-[11px]"
+          value={String(refreshIntervalMs)}
+          onChange={(e) => setRefreshIntervalMs(Number(e.target.value))}
+        >
+          {REFRESH_INTERVALS_MS.map((ms) => (
+            <option key={ms} value={ms}>
+              {ms === 0 ? 'Refresh: off' : `Refresh: ${ms / 1000} s`}
+            </option>
+          ))}
+        </NativeSelect>
         <Button
           size="sm"
           variant="ghost"
@@ -158,6 +219,7 @@ export function LogTable(): React.JSX.Element {
           className="min-h-0 flex-1 overflow-auto"
           role="table"
           aria-rowcount={snapshot.total}
+          onScroll={(e) => setScrolledAway(e.currentTarget.scrollTop > 4)}
         >
           <div style={{ minWidth: totalWidth }}>
             {headerGroups.map((hg) => (
@@ -234,7 +296,11 @@ export function LogTable(): React.JSX.Element {
                 }
               />
             ) : (
-              <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+              <div
+                style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
+                onMouseEnter={() => setHovering(true)}
+                onMouseLeave={() => setHovering(false)}
+              >
                 {items.map((item) => {
                   const row = rows[item.index];
                   if (!row) {

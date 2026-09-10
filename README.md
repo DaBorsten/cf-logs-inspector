@@ -34,4 +34,5 @@ pnpm package        # electron-builder installers into release/
 - [x] M7 streams panel: org/space/app pickers, start with recent backfill, stream controls (stop, interval, clear, delete)
 - [x] M8 log table: virtualized table with snapshot paging, new-entries banner, sortable/resizable columns, dynamic JSON columns, persisted layout, DQL input
 - [x] M9 query bar: CodeMirror editor with highlighting, lint, autocomplete for fields/values/operators, history, saved filters
-- [ ] M10+ time filter and auto refresh, detail view, export
+- [x] M10 time filter (quick picks, relative, absolute), auto refresh interval and tail mode with pause on interaction
+- [ ] M11+ detail panel and interactions, export and sessions, packaging

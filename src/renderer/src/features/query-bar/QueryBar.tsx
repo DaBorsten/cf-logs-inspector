@@ -11,6 +11,7 @@ import { useDeleteFilter, useSavedFilters, useSaveFilter } from '../../queries/f
 import { useKvJson } from '../../queries/kv';
 import { useQueryStore } from '../../store/query';
 import { useProps } from '../log-table/useEntries';
+import { TimeFilterControl } from '../time-filter/TimeFilterControl';
 import { dqlDiagnostics, type CompletionDeps } from './dql-language';
 import { QueryEditor } from './QueryEditor';
 
@@ -110,6 +111,7 @@ export function QueryBar(): React.JSX.Element {
         >
           Apply
         </Button>
+        <TimeFilterControl />
         <Button
           size="icon-sm"
           variant={panel === 'history' ? 'secondary' : 'ghost'}
