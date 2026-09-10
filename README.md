@@ -26,7 +26,7 @@ pnpm package        # electron-builder installers into release/
 
 - [x] M0 scaffold: electron-vite, React, strict TypeScript, typed IPC bridge, CSP, vitest
 - [x] M1 shared DQL package (`src/shared/dql`): tokenizer, parser, evaluator, autocomplete context, stringify
-- [ ] M2 auth + CF client
+- [x] M2 auth + CF client (`src/main/cf`): endpoint discovery, UAA password / custom-IdP origin / SSO passcode login with token refresh, encrypted token store, CF v3 orgs/spaces/apps
 - [ ] M3 Log Cache streaming
 - [ ] M4 storage
 - [ ] M5 query engine

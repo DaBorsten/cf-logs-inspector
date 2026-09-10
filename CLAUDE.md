@@ -33,11 +33,17 @@ deliberately does not depend on the `cf` CLI.
 |---|---|
 | M0 scaffold | done: electron-vite, React, strict TS, typed contextBridge IPC with channel allowlist, CSP, single-instance lock, electron-builder targets, vitest, eslint, prettier |
 | M1 shared DQL package | done: 220 vitest tests pass, typecheck and lint clean, `electron-vite build` succeeds |
-| M2 auth + CF client | **next** |
-| M3 Log Cache streaming, M4 storage, M5 query engine, M6+ UI | not started |
+| M2 auth + CF client | done (2026-09-10, Windows session): discovery, undici http with TLS options, UAA grants + TokenManager, passcode window, CC v3 orgs/spaces/apps, connection store, IPC `connection:*`/`auth:*`/`cf:*`; 336 tests, typecheck/lint/build clean. Not yet exercised against a real foundation. |
+| M3 Log Cache streaming | **next** |
+| M4 storage, M5 query engine, M6+ UI | not started |
 
-The Electron window has not yet been launched by anyone; only `pnpm build` was verified. First thing to do on
-a machine with a display: `pnpm dev` and confirm the placeholder window shows the app version via IPC.
+`pnpm dev` was verified on Windows on 2026-09-10 (window shows the placeholder with the app version). The M2
+code has only been tested against the in-process mock (`test/fixtures/mock-cf.ts`); the first real-foundation
+check (password login, origin login, SSO passcode window, org/space/app listing) still has to happen, either
+from a throwaway script or once the M6 connections UI exists.
+
+Git: the repository was initialised on Windows on 2026-09-10 (`main`). The WSL checkout predates it; treat this
+one as the origin of history.
 
 ## Repository layout (current)
 
@@ -51,12 +57,32 @@ tsconfig.base.json            strict, noUncheckedIndexedAccess, exactOptionalPro
 tsconfig.node.json            main + preload + shared + test
 tsconfig.web.json             renderer + shared (+ src/preload/index.d.ts for window.api)
 vitest.config.ts              globals on; renderer tests run in jsdom via environmentMatchGlobs
-src/main/index.ts             window creation, CSP header injection, navigation lockdown
-src/main/ipc/register.ts      `handle(channel, fn)` wrapper -> IpcResult {ok,value}|{ok,error}; only app:version + entries:validateDql so far
+src/main/index.ts             window creation, CSP header injection, navigation lockdown, AppContext wiring
+src/main/context.ts           AppContext { connections: ConnectionManager, logger } shared by IPC handlers
+src/main/log.ts               Logger interface + noopLogger + redact(); cf/store code never imports electron-log
+src/main/ipc/handle.ts        `handle(channel, zodSchema | undefined, fn)` -> IpcResult; toIpcError maps ZodError/CfError
+src/main/ipc/push.ts          pushEvent(event, payload) to all windows
+src/main/ipc/schemas.ts       zod request schemas per channel
+src/main/ipc/register.ts      app:version, entries:validateDql + calls the domain registrations below
+src/main/ipc/*.handlers.ts    connection.handlers, auth.handlers (passcode window), cf.handlers
+src/main/cf/errors.ts         CfError hierarchy + httpStatusError / mapNetworkError / describeErrorBody
+src/main/cf/http.ts           HttpClient over undici Agent (skipSslValidation, caCertPem, timeouts), json(req, zodSchema)
+src/main/cf/discovery.ts      normalizeApiUrl, discoverEndpoints, guessLogCacheUrl
+src/main/cf/uaa.ts            UaaClient grants, TokenSet/TokenStore, TokenManager, authStatusOf, decodeJwtPayload
+src/main/cf/cc-client.ts      CcClient.listOrgs/listSpaces/listApps with pagination + one 401 retry
+src/main/cf/passcode-window.ts openPasscodeWindow (per-connection partition), extractPasscode (pure)
+src/main/cf/connection-manager.ts ConnectionManager: profiles CRUD, test(), authStatus(), runtime(id) cache
+src/main/store/connections.ts ConnectionStore: connections.json (profiles + encrypted tokens), Encryptor interface
+src/main/store/safe-storage.ts safeStorageEncryptor (only file besides index.ts/passcode-window/ipc that imports electron)
 src/preload/index.ts          exposes window.api = { invoke(channel, req), on(event, cb) } with allowlists
 src/shared/ipc/contracts.ts   IpcContracts, INVOKE_CHANNELS, PushEvents, PUSH_EVENTS (add channels here first)
+src/shared/model/connection.ts ConnectionInput/Profile, AuthMode, AuthStatus, PasscodeStartResult
+src/shared/model/cf.ts        CfEndpoints, CfOrg, CfSpace, CfApp
+src/shared/regions.ts         BTP_REGIONS catalogue, btpApiUrl(region), btpRegionFromApiUrl(url)
 src/shared/dql/               ast, errors, tokenizer, parser, evaluator, wildcard, cursor, stringify, index + __tests__
 src/renderer/src/App.tsx      placeholder UI
+test/fixtures/mock-cf.ts      node:http(s) mock of API root + UAA + CC v3 with mutable state (startMockCf)
+test/fixtures/tls/            self-signed localhost cert/key for TLS option tests (valid until 2036)
 ```
 
 ## Conventions
@@ -70,7 +96,13 @@ src/renderer/src/App.tsx      placeholder UI
 - Tests are table-driven (`it.each`) and live next to the code in `__tests__`. Run `pnpm test`, `pnpm typecheck`,
   `pnpm lint` before committing; all three were clean at the last commit.
 - Commit messages end with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` when Claude wrote the change.
-- Formatting: prettier, single quotes, width 100, trailing commas.
+- Formatting: prettier, single quotes, width 100, trailing commas (`.prettierrc`). All files are formatted since
+  the M2 commit; run `pnpm format` before committing.
+- `src/main/cf` and `src/main/store` must stay runnable under plain Node (vitest): no `electron` or `electron-log`
+  imports there. Inject a `Logger` (`src/main/log.ts`) and an `Encryptor`; only `safe-storage.ts`,
+  `passcode-window.ts`, `ipc/*` and `index.ts` touch Electron APIs.
+- Errors thrown from main are `CfError` subclasses with a stable `code` (`src/main/cf/errors.ts`); `toIpcError`
+  puts that code on the wire, so the renderer branches on `error.code`, never on messages.
 
 ## DQL package semantics (src/shared/dql)
 
@@ -104,22 +136,48 @@ src/renderer/src/App.tsx      placeholder UI
   `.platform.sapcloud.cn`. Region catalogue to copy: npm package `btpcflogin`, file `data/regions-data.json`.
   The app must also accept arbitrary API URLs (non-BTP foundations).
 
-## Next milestone: M2 auth + CF client (see plan section "CF client")
+## M2 auth + CF client: how it fits together (done)
 
-Files to create under `src/main/cf/`: `discovery.ts`, `http.ts` (undici Agent per connection with
-`rejectUnauthorized`/custom CA, error mapping), `uaa.ts` (`TokenManager`: getAccessToken with single in-flight
-refresh, loginPassword, loginPasscode, refresh, logout; tokens via `safeStorage`), `passcode-window.ts`
-(sandboxed modal BrowserWindow on partition `persist:uaa-<connId>`, best-effort code scraping + manual paste),
-`cc-client.ts` (orgs/spaces/apps with `pagination.next`), `errors.ts`. Plus `src/main/store/connections.ts`
-for connection profiles and IPC channels `connection:*`, `auth:*`, `cf:*`. Test against a `node:http` mock of
-UAA + CC in `test/fixtures/`.
+- `ConnectionManager.runtime(id)` lazily builds and caches per profile: `HttpClient` (own undici Agent with the
+  profile's TLS settings) -> `discoverEndpoints` -> `UaaClient(login)` -> `TokenManager(store.tokenStore(id))`
+  -> `CcClient(cloud_controller_v3)`. Saving or deleting a profile disposes the runtime; a failed build is not
+  cached. `authStatus(id)` reads stored tokens without network when no runtime exists.
+- `TokenManager.getAccessToken()` returns the cached token until 60 s before expiry, then refreshes with a single
+  in-flight promise. A UAA rejection of the refresh clears the tokens and fires `onAuthRequired('refresh-failed')`;
+  non-auth failures (5xx, network) keep the session. `CcClient` retries once after a 401 with `forceRefresh()`
+  and calls `reportUnauthorized()` if the retry is rejected too. M3 pollers must pause on `auth:required`.
+- Login modes: `auth:loginPassword` sends `login_hint={"origin":...}` when the profile is `origin` mode (or the
+  dialog passes an origin). `auth:startPasscode` opens `passcode-window.ts` (partition `persist:uaa-<id>`,
+  https-only navigation, `certificate-error` accepted only with skipSslValidation), scrapes the code from the
+  "Temporary Authentication Code" page via `executeJavaScript(document.body.innerText)` and logs in; on window
+  close it returns `{kind:'cancelled'}` and the UI should offer `auth:passcodeLogin` (manual paste).
+- Tokens: whole `TokenSet` (access + refresh + expiry + username) is JSON-encrypted with `safeStorage` into
+  `connections.json` `tokens[id]`; if encryption is unavailable a per-id `MemoryTokenStore` is used instead.
+- Errors: UAA 400/401 on login -> `AUTH_FAILED` (bad credentials), on refresh -> `AUTH_REQUIRED`; CC 401 ->
+  `AUTH_REQUIRED`; TLS handshake codes -> `TLS_ERROR`; everything else per `httpStatusError`.
+- The mock (`startMockCf`) serves UAA under `<base>/uaa` (so prefix handling is tested), caps `per_page` at 2 to
+  force pagination, and exposes `state.validAccessTokens/validRefreshTokens/failNextCc/failNextUaa/notCf`.
+
+## Next milestone: M3 Log Cache streaming (see plan section "CF client", `log-cache.ts` + `poller.ts`)
+
+Create `src/main/cf/log-cache.ts` (`read(sourceId, {startTimeNs, endTimeNs, limit, descending})` through
+`HttpClient.json` + `TokenManager`, envelope zod schema, base64 payload decode, ns timestamps as strings/bigint)
+and `src/main/cf/poller.ts` (`--recent` = one descending read limit 1000 reversed; live = walk forward from
+cursor, immediate re-read when a page is full, poll interval default 1 s, 2 s overlap window for dedupe,
+exponential backoff 1->30 s on 5xx/network honouring `retryAfterMs`, `AbortController` stop, pause on
+`auth:required`). Add `ConnectionRuntime.logCache`. Extend `test/fixtures/mock-cf.ts` with
+`/logcache/api/v1/read/:sourceId` (pages, duplicates, out-of-order, 401 -> refresh, 500 backoff with fake timers).
 
 ## Platform notes
 
 - Native module: `better-sqlite3` is rebuilt for Electron by `postinstall` (`electron-builder install-app-deps`).
   Never share one `node_modules` between WSL and Windows; each OS needs its own install.
 - Windows: use a native Windows clone (not a path under `\\wsl$`), Node 22 + pnpm installed on Windows.
-  Line endings: if git normalises to CRLF, prettier may complain; set `git config core.autocrlf false` for this repo or add `.gitattributes` with `* text=auto eol=lf`.
+  `.gitattributes` forces LF (`* text=auto eol=lf`). `pnpm dev` works; to see renderer console output in the
+  terminal (e.g. preload failures) run with `ELECTRON_ENABLE_LOGGING=1`. In PowerShell, `Start-Process pnpm`
+  fails (shim is not a Win32 app); use `cmd /c pnpm ...` when scripting.
+- Sandboxed renderers only accept CommonJS preload scripts: the preload build is forced to `format: 'cjs'` with
+  entry `index.cjs` in `electron.vite.config.ts`. An ESM `.mjs` preload fails silently with a blank window.
 - WSL: WSLg is available (DISPLAY=:0), so `pnpm dev` opens a window. If Chromium sandbox errors appear use
   `ELECTRON_DISABLE_SANDBOX=1 pnpm dev`; GPU glitches: `pnpm dev -- --disable-gpu`.
 - The `.npmrc` uses `node-linker=hoisted` so electron-builder can resolve native deps.
@@ -128,3 +186,5 @@ UAA + CC in `test/fixtures/`.
 
 - Confirm implicit DQL operator `and` (vs. DQL default `or`).
 - Confirm Windows-first vs. Linux-first manual testing priority for packaged builds.
+- Passcode page scraping (`extractPasscode`) is based on the UAA "Temporary Authentication Code" page layout and
+  has not been verified against a real SAP BTP login; the manual-paste path (`auth:passcodeLogin`) is the fallback.
