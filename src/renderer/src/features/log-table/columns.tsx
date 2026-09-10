@@ -5,6 +5,8 @@ import { Badge } from '../../components/ui/badge';
 import { appColor } from '../../lib/colors';
 import { formatTimestamp, subMillisDigits, type TimeZoneMode } from '../../lib/time';
 import { cn } from '../../lib/utils';
+import { Highlighted } from './highlight';
+import './table-meta';
 
 export const PROP_PREFIX = 'p:';
 
@@ -164,11 +166,25 @@ export function buildColumns(props: PropInfo[], tz: TimeZoneMode): ColumnDef<Ent
       accessorFn: (r) => r.message,
       header: 'Message',
       size: 640,
-      cell: ({ row }) => (
-        <span className="font-mono text-[12px]" title={row.original.message}>
-          {row.original.message}
-        </span>
-      ),
+      cell: ({ row, table }) => {
+        const message = row.original.message;
+        const nl = message.indexOf('\n');
+        const firstLine = nl >= 0 ? message.slice(0, nl) : message;
+        const lines = nl >= 0 ? message.split('\n').length : 1;
+        return (
+          <span className="font-mono text-[12px]" title={message}>
+            <Highlighted text={firstLine} terms={table.options.meta?.highlightTerms ?? []} />
+            {lines > 1 ? (
+              <span
+                className="ml-1.5 rounded bg-muted px-1 text-[10px] text-muted-foreground"
+                title={`${lines} lines`}
+              >
+                ⏎ {lines}
+              </span>
+            ) : null}
+          </span>
+        );
+      },
     },
   ];
   const dynamic: ColumnDef<EntryRow>[] = props.map((p) => ({

@@ -42,8 +42,9 @@ deliberately does not depend on the `cf` CLI.
 | M8 log table core | done (2026-09-10): virtualized TanStack table with snapshot paging, new-entries banner, header sort, column resize, column picker (fixed + dynamic props, reorder) persisted per workspace in kv, Local/UTC toggle, plain-text DQL input with live validation; 611 tests. |
 | M9 query bar (CodeMirror) | done (2026-09-10): CodeMirror 6 single-line DQL editor with token highlighting, lint squiggles, field/value/operator autocomplete (`entries:values`), Enter/Escape, query history (kv `query.history`), saved filters (`saved_filters` table + `filters:*` IPC); 649 tests. |
 | M10 time filter + auto refresh + tail | done (2026-09-10): time range chip/panel (quick picks, custom relative, absolute in local/UTC, all time), auto refresh interval (off/1/2/5/10/30 s), tail mode with pause on scroll/hover/resize, refresh re-runs pages; 657 tests. |
-| M11 detail + interaction | **next** |
-| M12+ | not started |
+| M11 detail + interaction | done (2026-09-10): row selection (click/Ctrl/Shift, arrows/Page/Home/End, Ctrl+A, Escape), Ctrl+C copies NDJSON via entries:get, resizable detail panel (message/JSON tree/raw tabs, fields sidebar, copy buttons, filter for/out), query term highlighting, multi-line markers; 677 tests. |
+| M12 export + sessions | **next** |
+| M13+ | not started |
 
 `pnpm dev` was verified on Windows on 2026-09-10 (window shows the placeholder with the app version). The M2
 code has only been tested against the in-process mock (`test/fixtures/mock-cf.ts`); the first real-foundation
@@ -119,6 +120,12 @@ src/renderer/src/lib/colors.ts         appHue/appColor: deterministic colour tag
 src/renderer/src/lib/time.ts           formatTimestamp, formatMinute, msToDateTimeInput/dateTimeInputToMs (datetime-local in local|utc), describeTimeFilter
 src/renderer/src/store/query.ts        committed dql, sort (toggleSort cycles asc/desc/default), sessionIds, time, tz, refreshIntervalMs (REFRESH_INTERVALS_MS), tail
 src/renderer/src/features/time-filter/TimeFilterControl.tsx chip + panel writing useQueryStore.time (QUICK_PICKS, relative form, absolute form)
+src/renderer/src/store/selection.ts    ephemeral selection {ids, anchor, focus} + detailOpen
+src/renderer/src/features/log-table/selection.ts pure selectByClick/moveSelection (tests in __tests__/selection.test.ts)
+src/renderer/src/features/log-table/highlight.tsx buildHighlightTerms(dql) -> RegExp[], highlightSegments, <Highlighted/>
+src/renderer/src/features/log-table/table-meta.ts TableMeta augmentation (highlightTerms passed to cells)
+src/renderer/src/lib/dql-edit.ts        quoteDqlValue, scalarToDql, isFilterableField, appendClause(dql, field, value, negate)
+src/renderer/src/features/detail/       RowDetailPanel (kv layout.detail height, tabs message/json/raw, fields sidebar with filter for/out, copy raw/JSON, copyText), JsonTree (collapsible, per-leaf filter/copy)
 src/renderer/src/features/log-table/   LogView (QueryInput + LogTable), LogTable (virtualized grid), columns.tsx (fixed + p:<key> defs, layout types), useEntries.ts (snapshot/pages/props hooks), useColumnLayout.ts (kv-persisted layout), ColumnPicker
 src/renderer/src/features/query-bar/ QueryBar (editor + Apply + history/saved-filter panels), QueryEditor (CodeMirror wrapper), dql-language.ts (classifyTokens/dqlHighlight, dqlDiagnostics/dqlLint, completionOptions/dqlCompletionSource, singleLine, dqlTheme)
 src/renderer/src/queries/kv.ts         useKvJson(key, fallback) -> {value, set} per open workspace
@@ -424,19 +431,44 @@ test/fixtures/tls/            self-signed localhost cert/key for TLS option test
 - Tests use short real intervals (store set to 60 ms) rather than fake timers because TanStack Query and RTL
   `waitFor` do not mix well with `vi.useFakeTimers`.
 
-## Next milestone: M11 detail + interaction (see plan section "Renderer" -> Log table / Detail)
+## M11 detail + interaction: how it works (done)
 
-Row selection (click, Shift/Ctrl for ranges/multi, keyboard Up/Down/Home/End/PageUp/PageDown with the
-virtualizer's `scrollToIndex`), a resizable `RowDetailPanel` below/right of the table showing the selected
-entry via `entries:get` (raw line, formatted JSON tree with expand/collapse, all fixed fields, copy buttons:
-raw / JSON / message), "filter for value" / "filter out value" actions on JSON leaves and cells that append
-`field:value` / `not field:value` to the committed DQL (use `stringify` semantics and `quoteValue`), Ctrl+C on
-selected rows copies NDJSON of `EntryDetail`s, rich cells (term highlight of positive literals from
-`collectHighlightTerms(parse(dql))` in the message column, stacktrace detection: newline-containing messages get
-a "multi-line" marker and show fully in the detail panel). Persist detail panel size in kv `layout.detail`.
-Keep tail paused while a row is selected? Decide: tail keeps running but selection is by entry id (rows shift
-but the selected row stays highlighted). Tests: selection model as pure functions, detail panel with the mock
-(`entries:get` returns `raw`), filter-for-value appends to the store.
+- Selection lives in `useSelectionStore` as `{ids, anchor, focus}` by entry id (stable while tailing; rows
+  that scroll out of the page simply lose their highlight). `selectByClick` (plain / Ctrl toggle / Shift range
+  from the anchor / Ctrl+Shift adds a range) and `moveSelection` (arrows, PageUp/Down = 20 rows, Home/End,
+  Shift extends) are pure and unit-tested. The scroll container is focusable (`tabIndex 0`) and handles keys;
+  after a keyboard move the focused row is scrolled into view with `virtualizer.scrollToIndex`. Ctrl+A selects
+  the loaded rows, Escape clears, Ctrl+C fetches `entries:get` for up to 500 selected ids (batches of 20) and
+  copies NDJSON. Setting a focus opens the detail panel; closing it keeps the selection.
+- `RowDetailPanel` (bottom of `LogView`, height in kv `layout.detail`, drag handle) loads the focused entry
+  via `entries:get` and shows a header (timestamp, app tag, level, source/instance/stream/id), tabs message
+  (highlighted, whitespace preserved) / json (`JsonTree`) / raw, copy raw / copy JSON, and a fields sidebar
+  (`FIXED_ROWS`) with filter for/out actions. `JsonTree` expands two levels by default; array elements keep
+  the parent path because DQL matches any element; leaves offer filter for/out/copy when
+  `isFilterableField(path)` and the value is a scalar.
+- Filters append `field:value` / `not field:value` with an explicit `and` via `appendClause` (values quoted
+  by `quoteDqlValue`, result re-parsed defensively) and commit through `useQueryStore.setDql`.
+- Highlighting: `buildHighlightTerms(dql)` turns positive free-text / message literals into case-insensitive
+  regexes (wildcards -> lazy gaps); the table passes them through `table.options.meta.highlightTerms` to the
+  message cell, which also shows only the first line plus a `⏎ N` marker for multi-line messages.
+- Mock fixture note: `makeMockEntries` makes ids with `(id-1) % 3 === 2` plain text (3, 6, 9, ...), levels cycle
+  INFO, INFO, DEBUG, WARN, ERROR, null; tenants t1/t2/t3. Tests that click rows must pick ids accordingly.
+  `userEvent.setup()` installs its own clipboard stub; re-define `navigator.clipboard` after it when spying.
+
+## Next milestone: M12 export + sessions (see plan sections "Renderer" -> Export / Sessions, "Ingest")
+
+Export: main-side `src/main/db/export.ts` streaming NDJSON / JSON array / CSV (`csv` needs RFC 4180 quoting;
+port the writer style from `../cflogs/src/lib/output.js` if present) over the same `EntryQuery` scope
+(`sessionIds`, `dql`, `time`, `sort`, optional `snapshotId`, optional explicit `ids` for "selected rows"),
+column selection (visible/all fixed + props), progress push events `export:progress {jobId, written, total}` and
+`export:done {jobId, path}`; cancel via `export:cancel`; file picked with `dialog.showSaveDialog`
+(`export:run` -> path). Renderer `features/export/ExportDialog.tsx`: format, scope (all filtered / selected /
+loaded), columns (visible/all), progress + cancel + "Reveal". Sessions panel: clicking a session scopes the
+query (`useQueryStore.sessionIds`) and offers "set time range to session" (min/max ts from `entries:count`
+or a new `session:range`); a scope chip in the query bar clears it. Retention settings UI (per workspace in kv,
+read by the writer at flush time — add a `retention` getter to `StreamManager`/`Writer`). Tests: export writers
+on temp files (CSV quoting, NDJSON per line, JSON array validity, cancel mid-way), ExportDialog with the mock
+(add `export:*` to the mock), sessions scope chip.
 
 ## Platform notes
 

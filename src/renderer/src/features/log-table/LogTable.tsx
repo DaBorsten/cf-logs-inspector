@@ -8,17 +8,34 @@ import {
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowUp, ArrowUpDown, Globe, Pause, Radio, RefreshCw } from 'lucide-react';
-import { errorMessage } from '../../api/client';
+import { toast } from 'sonner';
+import type { EntryDetail } from '@shared/model/query';
+import { errorMessage, invoke } from '../../api/client';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { NativeSelect } from '../../components/ui/input';
 import { EmptyState, Spinner } from '../../components/ui/misc';
 import { cn, formatCount } from '../../lib/utils';
 import { REFRESH_INTERVALS_MS, useQueryStore } from '../../store/query';
+import { useSelectionStore } from '../../store/selection';
+import { copyText } from '../detail/RowDetailPanel';
 import { ColumnPicker } from './ColumnPicker';
 import { buildColumns, DEFAULT_PROP_SIZE, FIXED_COLUMNS, rowTintClass, sortKeyOf } from './columns';
+import { buildHighlightTerms } from './highlight';
+import { moveSelection, selectByClick, type SelectionMove } from './selection';
+import './table-meta';
 import { useColumnLayout } from './useColumnLayout';
 import { useEntryPages, useEntrySnapshot, useProps, type EntryScope } from './useEntries';
+
+const KEY_MOVES: Record<string, SelectionMove> = {
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+  PageUp: 'pageUp',
+  PageDown: 'pageDown',
+  Home: 'home',
+  End: 'end',
+};
+const COPY_LIMIT = 500;
 
 export const ROW_HEIGHT = 28;
 
@@ -34,6 +51,10 @@ export function LogTable(): React.JSX.Element {
   const setRefreshIntervalMs = useQueryStore((s) => s.setRefreshIntervalMs);
   const tail = useQueryStore((s) => s.tail);
   const setTail = useQueryStore((s) => s.setTail);
+  const selection = useSelectionStore((s) => s.selection);
+  const setSelection = useSelectionStore((s) => s.setSelection);
+  const clearSelection = useSelectionStore((s) => s.clear);
+  const highlightTerms = React.useMemo(() => buildHighlightTerms(dql), [dql]);
 
   const scope = React.useMemo<EntryScope>(() => {
     const s: EntryScope = { sort };
@@ -82,6 +103,7 @@ export function LogTable(): React.JSX.Element {
       })),
     getCoreRowModel: getCoreRowModel(),
     getRowId: (r) => String(r.id),
+    meta: { highlightTerms },
   });
 
   const scrollRef = React.useRef<HTMLDivElement>(null);
@@ -132,6 +154,68 @@ export function LogTable(): React.JSX.Element {
     }, refreshIntervalMs);
     return () => clearInterval(id);
   }, [refreshIntervalMs]);
+
+  // ---- selection, keyboard navigation, copy ----
+  const rowIds = React.useMemo(() => pages.rows.map((r) => r.id), [pages.rows]);
+  const selectedSet = React.useMemo(() => new Set(selection.ids), [selection.ids]);
+  const pendingScroll = React.useRef<number | null>(null);
+  React.useEffect(() => {
+    if (pendingScroll.current === null) return;
+    const idx = rowIds.indexOf(pendingScroll.current);
+    pendingScroll.current = null;
+    if (idx >= 0) virtualizer.scrollToIndex(idx, { align: 'auto' });
+  }, [selection.focus, rowIds, virtualizer]);
+
+  const copySelection = React.useCallback(async () => {
+    const ids = selection.ids.slice(0, COPY_LIMIT);
+    if (ids.length === 0) return;
+    try {
+      const details: EntryDetail[] = [];
+      for (let i = 0; i < ids.length; i += 20) {
+        details.push(
+          ...(await Promise.all(ids.slice(i, i + 20).map((id) => invoke('entries:get', { id })))),
+        );
+      }
+      await copyText(
+        details.map((d) => JSON.stringify(d)).join('\n'),
+        `Copied ${details.length} ${details.length === 1 ? 'entry' : 'entries'} as NDJSON`,
+      );
+    } catch (err) {
+      toast.error(`Copy failed: ${errorMessage(err)}`);
+    }
+  }, [selection.ids]);
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    const move = KEY_MOVES[e.key];
+    if (move) {
+      e.preventDefault();
+      setSelection((prev) => {
+        const next = moveSelection(prev, rowIds, move, e.shiftKey);
+        pendingScroll.current = next.focus;
+        return next;
+      });
+      return;
+    }
+    if (e.key === 'Escape') {
+      clearSelection();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
+      if (selection.ids.length > 0) {
+        e.preventDefault();
+        void copySelection();
+      }
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A') && rowIds.length > 0) {
+      e.preventDefault();
+      setSelection((prev) => ({
+        ids: [...rowIds],
+        anchor: rowIds[0]!,
+        focus: prev.focus ?? rowIds[0]!,
+      }));
+    }
+  };
 
   const headerGroups = table.getHeaderGroups();
   const visibleLeaf = table.getVisibleLeafColumns();
@@ -219,6 +303,9 @@ export function LogTable(): React.JSX.Element {
           className="min-h-0 flex-1 overflow-auto"
           role="table"
           aria-rowcount={snapshot.total}
+          aria-multiselectable
+          tabIndex={0}
+          onKeyDown={onKeyDown}
           onScroll={(e) => setScrolledAway(e.currentTarget.scrollTop > 4)}
         >
           <div style={{ minWidth: totalWidth }}>
@@ -314,20 +401,35 @@ export function LogTable(): React.JSX.Element {
                       </div>
                     );
                   }
+                  const id = row.original.id;
+                  const selected = selectedSet.has(id);
+                  const focused = selection.focus === id;
                   return (
                     <div
                       key={row.id}
                       role="row"
-                      data-entry-id={row.original.id}
+                      data-entry-id={id}
+                      aria-selected={selected}
+                      data-focused={focused ? 'true' : undefined}
                       className={cn(
-                        'absolute left-0 grid w-full items-center border-b border-border/60 text-[12px] hover:bg-accent/40',
+                        'absolute left-0 grid w-full cursor-default items-center border-b border-border/60 text-[12px] hover:bg-accent/40',
                         rowTintClass(row.original.level),
+                        selected && 'bg-primary/15 hover:bg-primary/20',
+                        focused && 'outline outline-1 -outline-offset-1 outline-primary/60',
                       )}
                       style={{
                         transform: `translateY(${item.start}px)`,
                         height: ROW_HEIGHT,
                         gridTemplateColumns: gridTemplate,
                       }}
+                      onClick={(e) =>
+                        setSelection((prev) =>
+                          selectByClick(prev, rowIds, id, {
+                            shift: e.shiftKey,
+                            ctrl: e.ctrlKey || e.metaKey,
+                          }),
+                        )
+                      }
                     >
                       {row.getVisibleCells().map((cell) => (
                         <div key={cell.id} role="cell" className="truncate px-2">
