@@ -63,3 +63,10 @@ export interface StreamStatusEvent {
 
 export const DEFAULT_POLL_INTERVAL_MS = 1000;
 export const POLL_INTERVALS_MS = [1000, 2000, 5000, 10_000, 30_000] as const;
+
+/** `session:range` result. */
+export interface SessionRange {
+  minTsNs: string;
+  maxTsNs: string;
+  count: number;
+}

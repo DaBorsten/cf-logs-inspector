@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import log from 'electron-log/main';
 import { ConnectionManager } from './cf/connection-manager';
 import type { AppContext } from './context';
+import { ExportManager } from './db/export-manager';
 import { WorkspaceManager } from './db/workspace-manager';
 import { StreamManager } from './ingest/stream-manager';
 import { registerIpcHandlers } from './ipc/register';
@@ -92,12 +93,18 @@ async function createContext(): Promise<AppContext> {
     onBatch: (ev) => pushEvent('stream:batch', ev),
     onStatus: (ev) => pushEvent('stream:status', ev),
   });
+  const exports = new ExportManager({
+    logger,
+    onProgress: (ev) => pushEvent('export:progress', ev),
+    onDone: (ev) => pushEvent('export:done', ev),
+    onFailed: (ev) => pushEvent('export:failed', ev),
+  });
   try {
     await workspaces.openLastOrDefault();
   } catch (err) {
     logger.error(`could not open a workspace at startup: ${String(err)}`);
   }
-  return { connections, workspaces, streams, logger };
+  return { connections, workspaces, streams, exports, logger };
 }
 
 if (!app.requestSingleInstanceLock()) {

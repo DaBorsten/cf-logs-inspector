@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Bookmark, BookmarkPlus, Clock, Trash2, X } from 'lucide-react';
+import { Bookmark, BookmarkPlus, Clock, History, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { QUERY_HISTORY_KV_KEY, QUERY_HISTORY_LIMIT, type SavedFilter } from '@shared/model/filters';
 import { fixedFieldNames } from '@shared/model/fields';
@@ -9,6 +9,7 @@ import { Input } from '../../components/ui/input';
 import { cn } from '../../lib/utils';
 import { useDeleteFilter, useSavedFilters, useSaveFilter } from '../../queries/filters';
 import { useKvJson } from '../../queries/kv';
+import { useSessions } from '../../queries/sessions';
 import { useQueryStore } from '../../store/query';
 import { useProps } from '../log-table/useEntries';
 import { TimeFilterControl } from '../time-filter/TimeFilterControl';
@@ -112,6 +113,7 @@ export function QueryBar(): React.JSX.Element {
           Apply
         </Button>
         <TimeFilterControl />
+        <SessionScopeChip />
         <Button
           size="icon-sm"
           variant={panel === 'history' ? 'secondary' : 'ghost'}
@@ -160,6 +162,28 @@ export function QueryBar(): React.JSX.Element {
         />
       ) : null}
     </div>
+  );
+}
+
+/** Shows the session scope (set from the Sessions panel) with a clear button. */
+function SessionScopeChip(): React.JSX.Element | null {
+  const sessionIds = useQueryStore((s) => s.sessionIds);
+  const setSessionIds = useQueryStore((s) => s.setSessionIds);
+  const { data: sessions } = useSessions(Boolean(sessionIds));
+  if (!sessionIds || sessionIds.length === 0) return null;
+  const names = sessionIds.map((id) => sessions?.find((s) => s.id === id)?.name ?? `#${id}`);
+  const label = names.length <= 2 ? names.join(', ') : `${names.length} sessions`;
+  return (
+    <Button
+      size="sm"
+      variant="secondary"
+      onClick={() => setSessionIds(undefined)}
+      title={`Scoped to ${names.join(', ')} — click to show all sessions`}
+      aria-label={`Session scope: ${label}. Clear`}
+    >
+      <History /> {label}
+      <X className="size-3 opacity-70" />
+    </Button>
   );
 }
 

@@ -43,7 +43,7 @@ deliberately does not depend on the `cf` CLI.
 | M9 query bar (CodeMirror) | done (2026-09-10): CodeMirror 6 single-line DQL editor with token highlighting, lint squiggles, field/value/operator autocomplete (`entries:values`), Enter/Escape, query history (kv `query.history`), saved filters (`saved_filters` table + `filters:*` IPC); 649 tests. |
 | M10 time filter + auto refresh + tail | done (2026-09-10): time range chip/panel (quick picks, custom relative, absolute in local/UTC, all time), auto refresh interval (off/1/2/5/10/30 s), tail mode with pause on scroll/hover/resize, refresh re-runs pages; 657 tests. |
 | M11 detail + interaction | done (2026-09-10): row selection (click/Ctrl/Shift, arrows/Page/Home/End, Ctrl+A, Escape), Ctrl+C copies NDJSON via entries:get, resizable detail panel (message/JSON tree/raw tabs, fields sidebar, copy buttons, filter for/out), query term highlighting, multi-line markers; 677 tests. |
-| M12 export + sessions | **next** |
+| M12 export + sessions | done (2026-09-10): streaming NDJSON/JSON/CSV export (`ExportJob`/`ExportManager`), `export:*` IPC + progress/done/failed push events, `ExportDialog` (format/scope/columns, progress, cancel, reveal), session scoping + "set time range to session" (`session:range`) with a query-bar scope chip, retention settings UI in the workspace dialog; 702 tests, typecheck/lint clean. |
 | M13+ | not started |
 
 `pnpm dev` was verified on Windows on 2026-09-10 (window shows the placeholder with the app version). The M2
@@ -455,20 +455,44 @@ test/fixtures/tls/            self-signed localhost cert/key for TLS option test
   INFO, INFO, DEBUG, WARN, ERROR, null; tenants t1/t2/t3. Tests that click rows must pick ids accordingly.
   `userEvent.setup()` installs its own clipboard stub; re-define `navigator.clipboard` after it when spying.
 
-## Next milestone: M12 export + sessions (see plan sections "Renderer" -> Export / Sessions, "Ingest")
+## M12 export + sessions: how it works (done)
 
-Export: main-side `src/main/db/export.ts` streaming NDJSON / JSON array / CSV (`csv` needs RFC 4180 quoting;
-port the writer style from `../cflogs/src/lib/output.js` if present) over the same `EntryQuery` scope
-(`sessionIds`, `dql`, `time`, `sort`, optional `snapshotId`, optional explicit `ids` for "selected rows"),
-column selection (visible/all fixed + props), progress push events `export:progress {jobId, written, total}` and
-`export:done {jobId, path}`; cancel via `export:cancel`; file picked with `dialog.showSaveDialog`
-(`export:run` -> path). Renderer `features/export/ExportDialog.tsx`: format, scope (all filtered / selected /
-loaded), columns (visible/all), progress + cancel + "Reveal". Sessions panel: clicking a session scopes the
-query (`useQueryStore.sessionIds`) and offers "set time range to session" (min/max ts from `entries:count`
-or a new `session:range`); a scope chip in the query bar clears it. Retention settings UI (per workspace in kv,
-read by the writer at flush time — add a `retention` getter to `StreamManager`/`Writer`). Tests: export writers
-on temp files (CSV quoting, NDJSON per line, JSON array validity, cancel mid-way), ExportDialog with the mock
-(add `export:*` to the mock), sessions scope chip.
+- `src/main/db/export.ts`: `ExportJob` streams rows to a file in NDJSON / JSON array / CSV (RFC 4180 quoting via
+  `csvEscape`/`csvHeader`/`csvLine`). Rows come from `queryPages()` (filtered scope, pins the snapshot id from
+  the first page so later pages don't shift) or `idPages()` (explicit `ids`, e.g. "export selected rows", which
+  ignores `sessionIds`/`dql`/`time` when present). `columnValue`/`toRecord` map fixed columns (including
+  `timestamp` as ISO via `isoOf`) and `p:<key>` props into the record shape per format. Cancelling deletes the
+  partial file; progress is reported via a callback (`written`/`total`).
+- `src/main/db/export-manager.ts` (`ExportManager`, held on `AppContext.exports`): runs `ExportJob`s by uuid job
+  id, tracks running jobs, exposes `cancel(jobId)`, and forwards `onProgress`/`onDone`/`onFailed` callbacks that
+  `index.ts` wires to `pushEvent('export:progress'|'export:done'|'export:failed', ...)`.
+- IPC (`src/main/ipc/export.handlers.ts`, schemas in `ipc/schemas.ts`): `export:run` opens
+  `dialog.showSaveDialog` with a suggested name/extension (`EXPORT_EXTENSIONS`), then starts the job and returns
+  `{jobId}` (or a cancelled-dialog result); `export:cancel {jobId}`; `export:reveal {path}` calls
+  `shell.showItemInFolder`. Shared types in `src/shared/model/export.ts`: `ExportFormat`, `ExportScope` (extends
+  `EntryCountQuery` + `sort?` + `ids?`), `ExportRequest`, `EXPORT_FIXED_COLUMNS`.
+- `src/main/db/settings.ts`: `readRetention(db)` reads the `retention` kv key (zod-validated, clamped to
+  1000..50M rows/session and 1000..200M rows/workspace), falling back to `DEFAULT_RETENTION`; `Writer` reads it
+  via a `retention()` getter on every flush so changes apply without a restart.
+- `src/main/db/repos/sessions.ts`: `sessionRange(db, id)` returns `{minTsNs, maxTsNs, count}` (or `null` if the
+  session has no rows; throws on an unknown session id) for "set time range to session".
+- Renderer: `features/export/ExportDialog.tsx` — format (ndjson/json/csv), scope (all filtered / selected rows
+  / currently loaded rows, with counts), columns (visible layout vs. all fixed+props), then a progress bar
+  fed by `export:progress`/`export:done`/`export:failed`, with cancel and "Reveal in folder". Opened from an
+  export button in `LogTable`'s toolbar with the current query scope + snapshot, selection and loaded ids.
+- `features/sessions/SessionsPanel.tsx`: click scopes the query to one session, Ctrl+click adds/removes
+  (`useQueryStore.sessionIds`), a "show all" clears it; a calendar button calls `session:range` and sets an
+  absolute time filter to the session's span. `QueryBar`'s `SessionScopeChip` shows the active scope and clears
+  it.
+- `features/workspaces/WorkspaceDialog.tsx` gained a retention settings form (max rows per session/workspace,
+  validated session ≤ workspace ≥ 1000) persisted to kv `retention`.
+- Mock (`api/mock/mock-api.ts`) implements `export:run/cancel/reveal` and `session:range` with seedable
+  `exportSavePath`/`cancelledExports` state and emits the same push events as main.
+
+## Next milestone: M13+
+
+Not started; see `docs/DEVELOPMENT_PLAN.md` for later milestones (packaging/CI, real-foundation verification,
+etc.) before picking the next scope of work.
 
 ## Platform notes
 

@@ -1,4 +1,5 @@
 import type { AppContext } from '../context';
+import { sessionRange } from '../db/repos/sessions';
 import { handle } from './handle';
 import {
   sessionCreateSchema,
@@ -19,4 +20,7 @@ export function registerSessionHandlers(ctx: AppContext): void {
   );
   handle('session:clear', sessionIdSchema, ({ sessionId }) => ctx.streams.clear(sessionId));
   handle('session:delete', sessionIdSchema, ({ sessionId }) => ctx.streams.delete(sessionId));
+  handle('session:range', sessionIdSchema, ({ sessionId }) =>
+    sessionRange(ctx.workspaces.db(), sessionId),
+  );
 }

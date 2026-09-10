@@ -195,3 +195,21 @@ export function distinctValues(db: Db, q: ValuesQuery, nowMs = Date.now()): stri
 export function listPropInfos(db: Db, sessionIds?: number[]): PropInfo[] {
   return listProps(db, sessionIds);
 }
+
+/** Like `queryEntries` but includes `raw` (export); same predicate, sort and paging rules. */
+export function queryEntriesWithRaw(db: Db, q: EntryQuery, nowMs = Date.now()): EntryDetail[] {
+  const limit = Math.min(Math.max(Math.trunc(q.paging.limit), 1), MAX_PAGE_SIZE);
+  const offset = Math.max(Math.trunc(q.paging.offset), 0);
+  const where = buildWhere(q, nowMs, true);
+  const sql = `SELECT ${ROW_COLUMNS}, raw FROM log_entries WHERE ${where.sql} ORDER BY ${buildOrderBy(q.sort)} LIMIT ? OFFSET ?`;
+  const rows = prepared(db, sql).all(...where.params, limit, offset) as RawRow[];
+  return rows.map((r) => ({ ...rowToEntry(r), raw: r.raw ?? '' }));
+}
+
+/** Entries for explicit ids (selected rows), newest first. Unknown ids are skipped. */
+export function queryEntriesByIds(db: Db, ids: number[]): EntryDetail[] {
+  if (ids.length === 0) return [];
+  const sql = `SELECT ${ROW_COLUMNS}, raw FROM log_entries WHERE id IN (${ids.map(() => '?').join(', ')}) ORDER BY ts_ns DESC, id DESC`;
+  const rows = db.prepare(sql).all(...ids) as RawRow[];
+  return rows.map((r) => ({ ...rowToEntry(r), raw: r.raw ?? '' }));
+}

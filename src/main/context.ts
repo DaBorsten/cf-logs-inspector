@@ -1,4 +1,5 @@
 import type { ConnectionManager } from './cf/connection-manager';
+import type { ExportManager } from './db/export-manager';
 import type { WorkspaceManager } from './db/workspace-manager';
 import type { StreamManager } from './ingest/stream-manager';
 import type { Logger } from './log';
@@ -8,5 +9,6 @@ export interface AppContext {
   connections: ConnectionManager;
   workspaces: WorkspaceManager;
   streams: StreamManager;
+  exports: ExportManager;
   logger: Logger;
 }

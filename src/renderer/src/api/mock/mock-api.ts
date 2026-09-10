@@ -10,6 +10,7 @@ import { entryFieldKind, TEXT_FIELDS } from '@shared/model/fields';
 import type { EntryDetail, EntryRow, PropInfo } from '@shared/model/query';
 import type { LogSession } from '@shared/model/session';
 import type { SavedFilter } from '@shared/model/filters';
+import type { ExportRequest } from '@shared/model/export';
 import type { WorkspaceInfo } from '@shared/model/workspace';
 import type { PreloadApi } from '@shared/ipc/bridge';
 
@@ -29,6 +30,10 @@ export interface MockState {
   entries: EntryDetail[];
   props: PropInfo[];
   filters: SavedFilter[];
+  /** Recorded export requests; `exportSavePath` null simulates a cancelled save dialog. */
+  exports: ExportRequest[];
+  exportSavePath: string | null;
+  cancelledExports: Set<string>;
   kv: Record<string, string>;
   /** Channels that should fail with this error (consumed once per call). */
   failures: Partial<Record<keyof IpcContracts, { code: string; message: string }>>;
@@ -85,6 +90,9 @@ export function defaultMockState(): MockState {
     entries: [],
     props: [],
     filters: [],
+    exports: [],
+    exportSavePath: 'C:\\mock\\export.ndjson',
+    cancelledExports: new Set(),
     kv: {},
     failures: {},
     calls: [],
@@ -398,6 +406,41 @@ export function createMockApi(init: Partial<MockState> = {}): MockApi {
       delete s.lastTsNs;
       return s;
     },
+    'session:range': ({ sessionId }) => {
+      session(sessionId);
+      const rows = state.entries.filter((e) => e.sessionId === sessionId);
+      if (rows.length === 0) return null;
+      const ts = rows.map((e) => BigInt(e.tsNs));
+      let min = ts[0]!;
+      let max = ts[0]!;
+      for (const t of ts) {
+        if (t < min) min = t;
+        if (t > max) max = t;
+      }
+      return { minTsNs: min.toString(), maxTsNs: max.toString(), count: rows.length };
+    },
+    'export:run': (req) => {
+      state.exports.push(req);
+      if (state.exportSavePath === null) return { jobId: null };
+      const jobId = `job-${state.exports.length}`;
+      const path = state.exportSavePath;
+      const rows = req.scope.ids
+        ? state.entries.filter((e) => req.scope.ids!.includes(e.id))
+        : filterEntries(req.scope);
+      setTimeout(() => {
+        if (state.cancelledExports.has(jobId)) {
+          emit('export:failed', { jobId, message: 'Export cancelled', cancelled: true });
+          return;
+        }
+        emit('export:progress', { jobId, written: rows.length, total: rows.length });
+        emit('export:done', { jobId, path, written: rows.length });
+      }, 10);
+      return { jobId, path };
+    },
+    'export:cancel': ({ jobId }) => {
+      state.cancelledExports.add(jobId);
+    },
+    'export:reveal': () => undefined,
     'session:delete': ({ sessionId }) => {
       session(sessionId);
       state.sessions = state.sessions.filter((s) => s.id !== sessionId);

@@ -70,4 +70,35 @@ describe('WorkspaceDialog', () => {
       expect.arrayContaining(['workspace:pickFile', 'workspace:openFile']),
     );
   });
+  it('shows and saves retention limits of the current workspace', async () => {
+    const mock = setupMock();
+    mock.state.kv['retention'] = JSON.stringify({ maxRowsPerSession: 20000 });
+    const user = userEvent.setup();
+    renderWithProviders(<WorkspaceDialog />);
+    act(() => useUiStore.getState().setWorkspaceDialogOpen(true));
+    await screen.findByRole('dialog', { name: 'Workspaces' });
+    const perSession = await screen.findByLabelText('Max rows per session');
+    await waitFor(() => expect(perSession).toHaveValue(20000));
+    const perWorkspace = screen.getByLabelText('Max rows per workspace');
+    expect(perWorkspace).toHaveValue(2_000_000);
+    const save = screen.getByRole('button', { name: 'Save limits' });
+    expect(save).toBeDisabled(); // nothing changed yet
+
+    await user.clear(perWorkspace);
+    await user.type(perWorkspace, '500');
+    expect(screen.getByText(/limits must be/i)).toBeInTheDocument();
+    expect(save).toBeDisabled();
+
+    await user.clear(perWorkspace);
+    await user.type(perWorkspace, '100000');
+    expect(save).toBeEnabled();
+    await user.click(save);
+    await waitFor(() =>
+      expect(JSON.parse(mock.state.kv['retention']!)).toEqual({
+        maxRowsPerSession: 20000,
+        maxRowsWorkspace: 100000,
+      }),
+    );
+    await waitFor(() => expect(save).toBeDisabled());
+  });
 });

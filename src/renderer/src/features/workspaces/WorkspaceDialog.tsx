@@ -1,7 +1,12 @@
 import * as React from 'react';
 import { FolderOpen, FolderSearch, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { WorkspaceInfo } from '@shared/model/workspace';
+import {
+  DEFAULT_RETENTION,
+  type RetentionSettings,
+  type WorkspaceInfo,
+} from '@shared/model/workspace';
+import { useKvJson } from '../../queries/kv';
 import { errorMessage } from '../../api/client';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
@@ -41,6 +46,7 @@ export function WorkspaceDialog(): React.JSX.Element {
         </DialogHeader>
         <CreateWorkspaceForm />
         <WorkspaceList />
+        <RetentionSettingsForm />
       </DialogContent>
     </Dialog>
   );
@@ -96,6 +102,70 @@ function CreateWorkspaceForm(): React.JSX.Element {
           }
         >
           <FolderSearch /> Open file…
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** Retention limits of the current workspace (kv `retention`), applied by the writer on every flush. */
+function RetentionSettingsForm(): React.JSX.Element | null {
+  const { data: current } = useCurrentWorkspace();
+  const retention = useKvJson<Partial<RetentionSettings>>('retention', {});
+  const effective = { ...DEFAULT_RETENTION, ...retention.value };
+  const [perSession, setPerSession] = React.useState(String(effective.maxRowsPerSession));
+  const [perWorkspace, setPerWorkspace] = React.useState(String(effective.maxRowsWorkspace));
+  React.useEffect(() => {
+    setPerSession(String(effective.maxRowsPerSession));
+    setPerWorkspace(String(effective.maxRowsWorkspace));
+  }, [effective.maxRowsPerSession, effective.maxRowsWorkspace]);
+  if (!current) return null;
+  const a = Number(perSession);
+  const b = Number(perWorkspace);
+  const valid = Number.isInteger(a) && a >= 1000 && Number.isInteger(b) && b >= 1000 && a <= b;
+  const dirty = a !== effective.maxRowsPerSession || b !== effective.maxRowsWorkspace;
+  return (
+    <form
+      className="flex flex-col gap-2 rounded-md border bg-muted/40 p-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!valid) return;
+        retention.set({ maxRowsPerSession: a, maxRowsWorkspace: b });
+        toast.success('Retention limits saved');
+      }}
+    >
+      <div className="text-xs font-medium">Retention for &quot;{current.name}&quot;</div>
+      <p className="text-[11px] text-muted-foreground">
+        Oldest entries are pruned when a session or the whole workspace exceeds these row counts.
+      </p>
+      <div className="flex items-end gap-2">
+        <Field id="ret-session" label="Max rows per session" className="flex-1">
+          <Input
+            id="ret-session"
+            type="number"
+            min={1000}
+            step={1000}
+            value={perSession}
+            onChange={(e) => setPerSession(e.target.value)}
+          />
+        </Field>
+        <Field
+          id="ret-workspace"
+          label="Max rows per workspace"
+          className="flex-1"
+          error={!valid ? 'Limits must be ≥ 1000 and session ≤ workspace' : undefined}
+        >
+          <Input
+            id="ret-workspace"
+            type="number"
+            min={1000}
+            step={1000}
+            value={perWorkspace}
+            onChange={(e) => setPerWorkspace(e.target.value)}
+          />
+        </Field>
+        <Button type="submit" variant="secondary" disabled={!valid || !dirty}>
+          Save limits
         </Button>
       </div>
     </form>

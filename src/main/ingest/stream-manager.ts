@@ -20,6 +20,7 @@ import {
   setPollInterval,
   setSessionStatus,
 } from '../db/repos/sessions';
+import { readRetention } from '../db/settings';
 import type { WorkspaceManager } from '../db/workspace-manager';
 import { noopLogger, type Logger } from '../log';
 import { parseEnvelope } from './parser';
@@ -225,7 +226,8 @@ export class StreamManager {
         logger: this.logger,
         onBatch: (ev) => this.onBatch?.(ev),
       };
-      if (this.retention) opts.retention = this.retention;
+      // Fixed limits (tests) or the workspace's kv settings, read on every flush.
+      opts.retention = this.retention ?? (() => readRetention(this.workspaces.db()));
       if (this.flushIntervalMs !== undefined) opts.flushIntervalMs = this.flushIntervalMs;
       this.writerInstance = new Writer(opts);
     }

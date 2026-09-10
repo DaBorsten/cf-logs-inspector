@@ -22,7 +22,8 @@ export interface WriterOptions {
   flushIntervalMs?: number;
   /** Flush immediately once this many entries are queued. Default 500. */
   maxBatch?: number;
-  retention?: RetentionSettings;
+  /** Fixed limits or a getter evaluated on every flush (settings can change while streaming). */
+  retention?: RetentionSettings | (() => RetentionSettings);
   onBatch?: (event: StreamBatchEvent) => void;
   logger?: Logger;
 }
@@ -44,7 +45,7 @@ export class Writer {
   private readonly db: Db;
   private readonly flushIntervalMs: number;
   private readonly maxBatch: number;
-  private readonly retention: RetentionSettings;
+  private readonly retention: () => RetentionSettings;
   private readonly onBatch: WriterOptions['onBatch'];
   private readonly logger: Logger;
   private queue: Queued[] = [];
@@ -58,7 +59,8 @@ export class Writer {
     this.db = opts.db;
     this.flushIntervalMs = opts.flushIntervalMs ?? 250;
     this.maxBatch = opts.maxBatch ?? 500;
-    this.retention = opts.retention ?? DEFAULT_RETENTION;
+    const retention = opts.retention ?? DEFAULT_RETENTION;
+    this.retention = typeof retention === 'function' ? retention : () => retention;
     this.onBatch = opts.onBatch;
     this.logger = opts.logger ?? noopLogger;
   }
@@ -113,6 +115,7 @@ export class Writer {
   }
 
   private commit(batch: Queued[]): StreamBatchEvent[] {
+    const retention = this.retention();
     // Group by session so counts, props and retention run once per session per flush.
     const bySession = new Map<number, ParsedEntry[]>();
     for (const q of batch) {
@@ -129,7 +132,7 @@ export class Writer {
       if (inserted > 0) {
         totalCount = recordBatch(this.db, sessionId, inserted, maxTsNs!);
         upsertProps(this.db, sessionId, collectProps(entries));
-        const excess = totalCount - this.retention.maxRowsPerSession;
+        const excess = totalCount - retention.maxRowsPerSession;
         if (excess > 0) {
           const pruned = deleteOldestOfSession(this.db, sessionId, excess);
           recountSessions(this.db, [sessionId]);
@@ -150,7 +153,7 @@ export class Writer {
         n: number;
       }
     ).n;
-    const excess = workspaceTotal - this.retention.maxRowsWorkspace;
+    const excess = workspaceTotal - retention.maxRowsWorkspace;
     if (excess > 0) {
       const affected = deleteOldestOfWorkspace(this.db, excess);
       recountSessions(this.db, affected);

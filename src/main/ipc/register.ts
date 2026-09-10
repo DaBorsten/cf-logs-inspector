@@ -5,6 +5,7 @@ import { registerAuthHandlers } from './auth.handlers';
 import { registerCfHandlers } from './cf.handlers';
 import { registerConnectionHandlers } from './connection.handlers';
 import { registerEntryHandlers } from './entries.handlers';
+import { registerExportHandlers } from './export.handlers';
 import { registerFilterHandlers } from './filters.handlers';
 import { handle } from './handle';
 import { validateDqlSchema } from './schemas';
@@ -34,4 +35,5 @@ export function registerIpcHandlers(ctx: AppContext): void {
   registerSessionHandlers(ctx);
   registerEntryHandlers(ctx);
   registerFilterHandlers(ctx);
+  registerExportHandlers(ctx);
 }

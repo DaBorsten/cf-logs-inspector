@@ -29,6 +29,14 @@ import type {
   ValuesQuery,
 } from '../model/query';
 import type { SavedFilter, SavedFilterInput } from '../model/filters';
+import type {
+  ExportDoneEvent,
+  ExportFailedEvent,
+  ExportProgressEvent,
+  ExportRequest,
+  ExportStarted,
+} from '../model/export';
+import type { SessionRange } from '../model/session';
 
 export interface IpcError {
   code: string;
@@ -102,6 +110,8 @@ export interface IpcContracts {
   /** Deletes the session's entries (stops it first); the session stays. */
   'session:clear': { req: { sessionId: number }; res: LogSession };
   'session:delete': { req: { sessionId: number }; res: void };
+  /** Oldest/newest stored timestamps of a session (null when empty). */
+  'session:range': { req: { sessionId: number }; res: SessionRange | null };
 
   // ---- query engine (M5) ----
   /** One page of entries; DQL is parsed/compiled in main, relative time filters resolved at call time. */
@@ -119,6 +129,12 @@ export interface IpcContracts {
   /** Create (no id) or update; an existing name is overwritten. */
   'filters:save': { req: SavedFilterInput; res: SavedFilter };
   'filters:delete': { req: { id: number }; res: void };
+
+  // ---- export (M12) ----
+  /** Shows the save dialog, then streams the export in the background (progress via push events). */
+  'export:run': { req: ExportRequest; res: ExportStarted };
+  'export:cancel': { req: { jobId: string }; res: void };
+  'export:reveal': { req: { path: string }; res: void };
 }
 
 export const INVOKE_CHANNELS = [
@@ -162,6 +178,10 @@ export const INVOKE_CHANNELS = [
   'filters:list',
   'filters:save',
   'filters:delete',
+  'session:range',
+  'export:run',
+  'export:cancel',
+  'export:reveal',
 ] as const satisfies readonly (keyof IpcContracts)[];
 
 export interface PushEvents {
@@ -175,6 +195,9 @@ export interface PushEvents {
   'stream:batch': StreamBatchEvent;
   /** A session's poller changed state. */
   'stream:status': StreamStatusEvent;
+  'export:progress': ExportProgressEvent;
+  'export:done': ExportDoneEvent;
+  'export:failed': ExportFailedEvent;
 }
 
 export const PUSH_EVENTS = [
@@ -183,4 +206,7 @@ export const PUSH_EVENTS = [
   'auth:changed',
   'stream:batch',
   'stream:status',
+  'export:progress',
+  'export:done',
+  'export:failed',
 ] as const satisfies readonly (keyof PushEvents)[];

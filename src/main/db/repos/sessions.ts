@@ -141,3 +141,22 @@ export function clearSessionData(db: Db, id: number): void {
     if (info.changes === 0) throw new NotFoundError(`Unknown session ${id}`);
   })();
 }
+
+export interface SessionRange {
+  minTsNs: string;
+  maxTsNs: string;
+  count: number;
+}
+
+/** Oldest/newest stored timestamps of a session, or null when it has no entries. */
+export function sessionRange(db: Db, id: number): SessionRange | null {
+  getSession(db, id);
+  const row = db
+    .prepare(
+      `SELECT CAST(MIN(ts_ns) AS TEXT) AS minTs, CAST(MAX(ts_ns) AS TEXT) AS maxTs, COUNT(*) AS n
+         FROM log_entries WHERE session_id = ?`,
+    )
+    .get(id) as { minTs: string | null; maxTs: string | null; n: number };
+  if (!row.minTs || !row.maxTs) return null;
+  return { minTsNs: row.minTs, maxTsNs: row.maxTs, count: row.n };
+}

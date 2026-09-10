@@ -7,7 +7,16 @@ import {
   type SortingState,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown, ArrowUp, ArrowUpDown, Globe, Pause, Radio, RefreshCw } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  Download,
+  Globe,
+  Pause,
+  Radio,
+  RefreshCw,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import type { EntryDetail } from '@shared/model/query';
 import { errorMessage, invoke } from '../../api/client';
@@ -19,6 +28,7 @@ import { cn, formatCount } from '../../lib/utils';
 import { REFRESH_INTERVALS_MS, useQueryStore } from '../../store/query';
 import { useSelectionStore } from '../../store/selection';
 import { copyText } from '../detail/RowDetailPanel';
+import { ExportDialog } from '../export/ExportDialog';
 import { ColumnPicker } from './ColumnPicker';
 import { buildColumns, DEFAULT_PROP_SIZE, FIXED_COLUMNS, rowTintClass, sortKeyOf } from './columns';
 import { buildHighlightTerms } from './highlight';
@@ -136,6 +146,7 @@ export function LogTable(): React.JSX.Element {
   // scrolled away from the top, pointer over the rows, or dragging a column edge.
   const [scrolledAway, setScrolledAway] = React.useState(false);
   const [hovering, setHovering] = React.useState(false);
+  const [exportOpen, setExportOpen] = React.useState(false);
   const resizing = Boolean(table.getState().columnSizingInfo.isResizingColumn);
   const tailPaused = scrolledAway || hovering || resizing;
   const latest = React.useRef({ refresh: snapshot.refresh, newCount: snapshot.newCount, time });
@@ -282,6 +293,24 @@ export function LogTable(): React.JSX.Element {
           <Globe /> {tz === 'local' ? 'Local' : 'UTC'}
         </Button>
         <ColumnPicker layout={layout} props={propInfos ?? []} onChange={setLayout} />
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setExportOpen(true)}
+          disabled={snapshot.total === 0 && selection.ids.length === 0}
+        >
+          <Download /> Export
+        </Button>
+        <ExportDialog
+          open={exportOpen}
+          onOpenChange={setExportOpen}
+          scope={{ ...scope, ...(snapshotId !== undefined ? { snapshotId } : {}) }}
+          total={snapshot.total}
+          selectedIds={selection.ids}
+          loadedIds={rowIds}
+          layout={layout}
+          props={propInfos ?? []}
+        />
         <Button
           size="sm"
           variant="ghost"

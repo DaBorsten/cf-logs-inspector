@@ -124,3 +124,24 @@ export const savedFilterSchema = z.object({
   timeFilter: timeFilterSchema.optional(),
 });
 export const filterIdSchema = z.object({ id: z.number().int().positive() });
+
+// ---- export ----
+const sortSpecs = z
+  .array(z.object({ key: z.string().min(1).max(200), dir: z.enum(['asc', 'desc']) }))
+  .max(5)
+  .optional();
+export const exportRunSchema = z.object({
+  format: z.enum(['ndjson', 'json', 'csv']),
+  columns: z.array(z.string().min(1).max(200)).min(1).max(500),
+  scope: z.object({
+    sessionIds,
+    dql,
+    time: timeFilterSchema.optional(),
+    snapshotId: z.number().int().nonnegative().optional(),
+    sort: sortSpecs,
+    ids: z.array(z.number().int().positive()).max(100_000).optional(),
+  }),
+  suggestedName: z.string().max(200).optional(),
+});
+export const exportCancelSchema = z.object({ jobId: z.string().min(1).max(100) });
+export const exportRevealSchema = z.object({ path: z.string().min(1).max(4000) });
