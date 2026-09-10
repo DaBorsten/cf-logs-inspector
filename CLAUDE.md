@@ -39,8 +39,9 @@ deliberately does not depend on the `cf` CLI.
 | M5 query engine | done (2026-09-10): DQL->SQL compiler, entry query/count/get/values, props list, time filters, snapshot paging, IPC `entries:*` + `props:list`; 100-query SQL-vs-evaluator equivalence suite; 582 tests. |
 | M6 app shell + workspaces + connections UI | done (2026-09-10): Tailwind 4 + Radix primitives, TanStack Query, zustand; AppShell (TitleBar/SidePanel/StatusBar), theme, workspace switcher + manage dialog, connections panel/form, login dialog (password / origin / passcode + manual paste), auth:required toasts; in-memory IPC mock for jsdom tests; 597 tests. Still no real-foundation check. |
 | M7 streams panel | done (2026-09-10): connection/org/space pickers, app multi-select with filter, recent toggle, start (reuse existing session per app), stream list with stop/resume, poll interval, clear/delete, login shortcut; 603 tests. End-to-end against a real foundation still pending. |
-| M8 log table core | **next** |
-| M9+ UI | not started |
+| M8 log table core | done (2026-09-10): virtualized TanStack table with snapshot paging, new-entries banner, header sort, column resize, column picker (fixed + dynamic props, reorder) persisted per workspace in kv, Local/UTC toggle, plain-text DQL input with live validation; 611 tests. |
+| M9 query bar (CodeMirror) | **next** |
+| M10+ UI | not started |
 
 `pnpm dev` was verified on Windows on 2026-09-10 (window shows the placeholder with the app version). The M2
 code has only been tested against the in-process mock (`test/fixtures/mock-cf.ts`); the first real-foundation
@@ -113,6 +114,11 @@ src/renderer/src/features/streams/     StreamsPanel (guards) -> StreamPicker (co
 src/renderer/src/queries/cf.ts         useOrgs/useSpaces/useApps (enabled only while logged in)
 src/renderer/src/queries/sessions.ts   useSessions + useStartStreams (create-or-reuse + start per app), start/stop/setInterval/clear/delete mutations
 src/renderer/src/lib/colors.ts         appHue/appColor: deterministic colour tag per app name
+src/renderer/src/lib/time.ts           formatTimestamp(tsNs, 'local'|'utc'), tsNsToDate, subMillisDigits
+src/renderer/src/store/query.ts        committed dql, sort (toggleSort cycles asc/desc/default), sessionIds, time, tz
+src/renderer/src/features/log-table/   LogView (QueryInput + LogTable), LogTable (virtualized grid), columns.tsx (fixed + p:<key> defs, layout types), useEntries.ts (snapshot/pages/props hooks), useColumnLayout.ts (kv-persisted layout), ColumnPicker
+src/renderer/src/features/query-bar/QueryInput.tsx plain input with entries:validateDql (CodeMirror replaces it in M9)
+src/renderer/src/api/mock/entries.ts   makeMockEntries(n, opts) + propsOf(entries) fixture generators
 src/renderer/src/test/render.tsx setupMock(state) + renderWithProviders + sampleConnection for component tests
 src/renderer/src/styles/globals.css Tailwind 4 import, shadcn-style tokens (light/dark via .dark), base layer
 src/shared/ipc/contracts.ts   IpcContracts, INVOKE_CHANNELS, PushEvents, PUSH_EVENTS (add channels here first)
@@ -343,20 +349,46 @@ test/fixtures/tls/            self-signed localhost cert/key for TLS option test
   button for `paused-auth` sessions. No Radix dropdowns in rows (slow and flaky in jsdom; inline controls test
   fine with `userEvent`).
 
-## Next milestone: M8 log table core (see plan section "Renderer" -> Log table)
+## M8 log table core: how it works (done)
 
-The main area still shows a stats card. Build `features/log-table/`: TanStack Table v8 with
-`manualSorting/manualPagination`, TanStack Virtual with fixed row height, pages of 200 via `entries:query`
-keyed by `(query hash, snapshotId, page)` (`useInfiniteQuery` or page cache), snapshot taken from
-`entries:count` (`maxId`) on (re)load, `stream:batch` -> "N new entries" banner (compare `count.maxId` with the
-snapshot) with a click to refresh; fixed columns (timestamp with Local/UTC, app tag with `appColor`, level with
-row tint, source type, instance, message) plus dynamic columns from `props:list` (`json` values via
-`row.props`), column picker/visibility/order/size/pinning persisted per workspace in `kv`
-(`workspace:kvGet/kvSet`, key `layout.columns`), header sort -> `sort` in `EntryQuery`; a temporary plain text
-query input wired to `entries:validateDql` + `entries:query` until M9 brings CodeMirror. Add `entries` to the
-mock backend seed (`MockState.entries`, `EntryDetail[]`) with a small generator for tests. Check the
-`EntryQuery` contract in `src/shared/model/query.ts` and `DEFAULT_SORT`. Keep `raw` out of list rows
-(`entries:get` for the detail view in M11).
+- `useQueryStore` holds what the table shows: committed `dql`, `sort` (single key; `toggleSort` cycles
+  asc -> desc -> `DEFAULT_SORT`), `sessionIds`, `time`, `tz` (persisted). `QueryInput` edits a draft, validates
+  with `entries:validateDql` (debounced 200 ms, error shown with position), Enter/Apply commits, Escape reverts.
+- `useEntrySnapshot(scope)`: `live` count (`entries:count` without snapshot) -> when the scope key changes the
+  snapshot becomes `live.maxId`; `inSnapshot` count gives the displayed total; `newCount = live.total -
+  inSnapshot.total` drives the "N new entries · show" pill; `refresh()` refetches live and re-snapshots.
+  `ApiEvents` invalidates `[...qk.entries, 'count']` and `qk.props` on `stream:batch`, so the banner updates
+  while the pages (keyed by snapshot) stay stable. `useEntryPages` is an `useInfiniteQuery` of 200-row pages
+  (`offset` page param) with `keepPreviousData`; the virtualizer renders a loader row past the end that triggers
+  `fetchNextPage`.
+- `LogTable`: TanStack Table (`manualSorting`, `manualPagination`, `columnResizeMode: 'onChange'`) rendered as
+  CSS grid rows (`gridTemplateColumns` from column sizes, fixed 28 px rows) inside a TanStack Virtual list
+  (`overscan 15`, `initialRect`). Header buttons sort (`aria-sort`), a right-edge handle resizes
+  (double-click resets), rows get a level tint (`rowTintClass`). Column ids: fixed (`timestamp`, `level`, `app`,
+  `source_type`, `instance`, `stream`, `session`, `message`) and `p:<key>` for props from `props:list`
+  (`sortKeyOf` strips the prefix for `EntryQuery.sort`).
+- `useColumnLayout`: `{order, sizes}` per workspace in kv key `layout.columns` (read once per workspace,
+  written debounced 400 ms; `ColumnPicker` toggles/reorders with arrow buttons, "Reset" restores
+  `DEFAULT_LAYOUT`). Pinning and drag-and-drop reordering were deferred (plan lists dnd-kit; add in M14 if
+  wanted).
+- jsdom: TanStack Virtual measures the scroll element with `offsetWidth/offsetHeight`, which are 0 in jsdom.
+  `test/setup-dom.ts` returns 1200x600 for elements carrying `data-virtual-scroll`; mark any virtualized scroll
+  container with that attribute. The scroll container also must not call `scrollTo` (jsdom lacks it); set
+  `scrollTop` instead.
+- Vite: `optimizeDeps.include` lists all renderer deps so the dev server never re-optimises mid-session
+  (that produced "Invalid hook call" from two React copies once M8 pulled in TanStack Table/Virtual).
+
+## Next milestone: M9 query bar (see plan section "Renderer" -> Query bar)
+
+Replace `features/query-bar/QueryInput.tsx` with a CodeMirror 6 single-line editor (`@codemirror/state`,
+`@codemirror/view`, `@codemirror/autocomplete`, `@codemirror/lint`, `@lezer/highlight` for a token-based
+highlighter fed by `tokenize()` from `src/shared/dql`), lint squiggles from `parse()` (positions are in the
+AST errors), autocomplete via `completionContextAt(input, cursor)`: fields from `FIXED_FIELDS` + `props:list`,
+values from `entries:values` (debounced, prefix), operators `and/or/not`; Enter submits (no newline), Escape
+reverts; query history (last 50 per workspace in kv `query.history`) and saved filters (`saved_filters` table:
+add `filters:{list,save,delete}` IPC + repo). Keep `useQueryStore.dql` as the committed value and expose
+`setDql`. Tests: RTL with the mock backend (CodeMirror needs `document.createRange`/`getClientRects` polyfills
+in `test/setup-dom.ts`; if it fights jsdom, unit-test the extensions' pure parts and keep one smoke test).
 
 ## Platform notes
 

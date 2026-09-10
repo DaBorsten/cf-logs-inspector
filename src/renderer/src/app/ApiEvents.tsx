@@ -46,6 +46,9 @@ export function ApiEvents(): null {
   useApiEvent('stream:batch', () => {
     void qc.invalidateQueries({ queryKey: qk.sessions });
     void qc.invalidateQueries({ queryKey: qk.workspaceStats });
+    // Live counts drive the "N new entries" banner; snapshot pages stay put.
+    void qc.invalidateQueries({ queryKey: [...qk.entries, 'count'] });
+    void qc.invalidateQueries({ queryKey: qk.props });
   });
 
   return null;

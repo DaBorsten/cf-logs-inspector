@@ -20,5 +20,26 @@ export default defineConfig({
   renderer: {
     plugins: [react(), tailwindcss()],
     resolve: { alias: { ...shared, '@renderer': resolve('src/renderer/src') } },
+    // Pre-bundle everything the renderer uses so Vite never re-optimises mid-session (which briefly
+    // loads two copies of React and crashes hooks with "Invalid hook call").
+    optimizeDeps: {
+      include: [
+        'react',
+        'react-dom',
+        'react-dom/client',
+        'react/jsx-runtime',
+        '@tanstack/react-query',
+        '@tanstack/react-table',
+        '@tanstack/react-virtual',
+        'radix-ui',
+        'zustand',
+        'zustand/middleware',
+        'sonner',
+        'lucide-react',
+        'clsx',
+        'tailwind-merge',
+        'class-variance-authority',
+      ],
+    },
   },
 });
