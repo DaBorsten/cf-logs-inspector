@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { CfApp, CfOrg, CfSpace } from '@shared/model/cf';
-import { AuthError, BadResponseError } from './errors';
+import { getJsonWithAuth } from './authorized';
+import { BadResponseError } from './errors';
 import type { HttpClient } from './http';
 import type { TokenManager } from './uaa';
 import { noopLogger, type Logger } from '../log';
@@ -116,35 +117,13 @@ export class CcClient {
       if (page >= this.maxPages) {
         throw new BadResponseError(`Gave up after ${this.maxPages} pages of ${firstUrl}`);
       }
-      const body: Page<T> = await this.getWithAuth(url, schema, signal);
+      const body: Page<T> = await getJsonWithAuth(this.http, this.tokens, url, schema, {
+        signal,
+        logger: this.logger,
+      });
       out.push(...body.resources);
       url = body.pagination?.next?.href ?? undefined;
     }
     return out;
-  }
-
-  /** GET with bearer token; on 401 refresh once and retry, then drop the session if still rejected. */
-  private async getWithAuth<T>(
-    url: string,
-    schema: z.ZodType<T>,
-    signal: AbortSignal | undefined,
-  ): Promise<T> {
-    const token = await this.tokens.getAccessToken();
-    try {
-      return await this.http.json(signal ? { url, token, signal } : { url, token }, schema);
-    } catch (err) {
-      if (!(err instanceof AuthError) || err.status !== 401) throw err;
-      this.logger.info(`401 from ${url}; refreshing token and retrying once`);
-      const fresh = await this.tokens.forceRefresh();
-      try {
-        return await this.http.json(
-          signal ? { url, token: fresh, signal } : { url, token: fresh },
-          schema,
-        );
-      } catch (err2) {
-        if (err2 instanceof AuthError && err2.status === 401) this.tokens.reportUnauthorized();
-        throw err2;
-      }
-    }
   }
 }

@@ -9,6 +9,7 @@ import { CcClient } from './cc-client';
 import { discoverEndpoints, normalizeApiUrl } from './discovery';
 import { NotFoundError } from './errors';
 import { HttpClient, type TlsOptions } from './http';
+import { LogCacheClient } from './log-cache';
 import { authStatusOf, TokenManager, UaaClient } from './uaa';
 import { noopLogger, type Logger } from '../log';
 import type { ConnectionStore } from '../store/connections';
@@ -21,6 +22,7 @@ export interface ConnectionRuntime {
   uaa: UaaClient;
   tokens: TokenManager;
   cc: CcClient;
+  logCache: LogCacheClient;
 }
 
 export interface ConnectionManagerOptions {
@@ -143,7 +145,13 @@ export class ConnectionManager {
         tokens,
         logger: this.logger,
       });
-      return { profile, endpoints, http, uaa, tokens, cc };
+      const logCache = new LogCacheClient({
+        http,
+        baseUrl: endpoints.logCache,
+        tokens,
+        logger: this.logger,
+      });
+      return { profile, endpoints, http, uaa, tokens, cc, logCache };
     } catch (err) {
       await http.close();
       throw err;

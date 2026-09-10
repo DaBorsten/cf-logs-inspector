@@ -30,6 +30,17 @@ export interface MockApp {
   state: string;
 }
 
+export interface MockLog {
+  sourceId: string;
+  /** Nanoseconds, decimal string. */
+  timestampNs: string;
+  message: string;
+  type?: 'OUT' | 'ERR';
+  instanceId?: string;
+  appName?: string;
+  sourceType?: string;
+}
+
 export interface RecordedRequest {
   method: string;
   path: string;
@@ -53,6 +64,14 @@ export interface MockCfState {
   failNextCc?: { status: number; body?: string; headers?: Record<string, string> } | undefined;
   /** Next UAA request fails with this response (consumed once). */
   failNextUaa?: { status: number; body?: string } | undefined;
+  /** Log Cache envelopes across all sources. */
+  logs: MockLog[];
+  /** Page cap applied to Log Cache `limit` (real Log Cache: 1000). */
+  logCacheLimitCap: number;
+  /** Queue of failures for upcoming Log Cache reads (each consumed once, in order). */
+  failLogCache: { status: number; body?: string; headers?: Record<string, string> }[];
+  /** Return Log Cache pages in scrambled order to exercise client-side sorting. */
+  scrambleLogCache: boolean;
   requests: RecordedRequest[];
   /** Root document overrides (e.g. drop `log_cache`). */
   rootLinks?: Record<string, { href: string } | null> | undefined;
@@ -69,6 +88,8 @@ export interface MockCf {
   state: MockCfState;
   /** Requests recorded for a path prefix. */
   requestsTo(prefix: string): RecordedRequest[];
+  /** Appends Log Cache envelopes; `messages` become sequential timestamps starting at `startNs` (step `stepNs`). */
+  addLogs(sourceId: string, messages: string[], startNs: bigint, stepNs?: bigint): MockLog[];
   close(): Promise<void>;
 }
 
@@ -125,6 +146,10 @@ export async function startMockCf(opts: MockCfOptions = {}): Promise<MockCf> {
     validAccessTokens: new Set(),
     validRefreshTokens: new Set(),
     tokenTtlSec: opts.tokenTtlSec ?? 600,
+    logs: [],
+    logCacheLimitCap: 1000,
+    failLogCache: [],
+    scrambleLogCache: false,
     requests: [],
     issued: 0,
   };
@@ -279,6 +304,63 @@ export async function startMockCf(opts: MockCfOptions = {}): Promise<MockCf> {
     }
   };
 
+  const handleLogCache = (req: IncomingMessage, res: ServerResponse, url: URL): void => {
+    const fail = state.failLogCache.shift();
+    if (fail) {
+      res.writeHead(fail.status, { 'content-type': 'application/json', ...(fail.headers ?? {}) });
+      res.end(fail.body ?? JSON.stringify({ message: 'simulated log-cache failure' }));
+      return;
+    }
+    const auth = req.headers.authorization ?? '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+    if (!state.validAccessTokens.has(token)) {
+      json(res, 401, { message: 'unauthorized' });
+      return;
+    }
+    const m = /^\/logcache\/api\/v1\/read\/([^/]+)$/.exec(url.pathname);
+    if (!m) {
+      json(res, 404, { message: 'not found' });
+      return;
+    }
+    const sourceId = decodeURIComponent(m[1]!);
+    const start = url.searchParams.get('start_time');
+    const end = url.searchParams.get('end_time');
+    const descending = url.searchParams.get('descending') === 'true';
+    const limit = Math.min(Number(url.searchParams.get('limit') ?? 100), state.logCacheLimitCap);
+    let rows = state.logs.filter((l) => l.sourceId === sourceId);
+    if (start) rows = rows.filter((l) => BigInt(l.timestampNs) >= BigInt(start));
+    if (end) rows = rows.filter((l) => BigInt(l.timestampNs) < BigInt(end));
+    rows.sort((a, b) => {
+      const d = BigInt(a.timestampNs) - BigInt(b.timestampNs);
+      const c = d < 0n ? -1 : d > 0n ? 1 : 0;
+      return descending ? -c : c;
+    });
+    rows = rows.slice(0, limit);
+    if (state.scrambleLogCache) {
+      for (let i = 0; i + 1 < rows.length; i += 2)
+        [rows[i], rows[i + 1]] = [rows[i + 1]!, rows[i]!];
+    }
+    json(res, 200, {
+      envelopes: {
+        batch: rows.map((l) => ({
+          timestamp: l.timestampNs,
+          source_id: l.sourceId,
+          instance_id: l.instanceId ?? '0',
+          deprecated_tags: {},
+          tags: {
+            app_name: l.appName ?? 'app',
+            source_type: l.sourceType ?? 'APP/PROC/WEB',
+            origin: 'rep',
+          },
+          log: {
+            payload: Buffer.from(l.message, 'utf8').toString('base64'),
+            type: l.type ?? 'OUT',
+          },
+        })),
+      },
+    });
+  };
+
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? '/', baseUrl);
     const body = await readBody(req);
@@ -317,6 +399,10 @@ export async function startMockCf(opts: MockCfOptions = {}): Promise<MockCf> {
       handleCc(req, res, url);
       return;
     }
+    if (url.pathname.startsWith('/logcache/')) {
+      handleLogCache(req, res, url);
+      return;
+    }
     res.writeHead(404);
     res.end('not found');
   };
@@ -335,6 +421,15 @@ export async function startMockCf(opts: MockCfOptions = {}): Promise<MockCf> {
     loginUrl: `${baseUrl}/uaa`,
     state,
     requestsTo: (prefix) => state.requests.filter((r) => r.path.startsWith(prefix)),
+    addLogs: (sourceId, messages, startNs, stepNs = 1_000_000n) => {
+      const added = messages.map((message, i) => ({
+        sourceId,
+        timestampNs: (startNs + BigInt(i) * stepNs).toString(),
+        message,
+      }));
+      state.logs.push(...added);
+      return added;
+    },
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.closeAllConnections();

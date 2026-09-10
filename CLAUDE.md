@@ -34,8 +34,9 @@ deliberately does not depend on the `cf` CLI.
 | M0 scaffold | done: electron-vite, React, strict TS, typed contextBridge IPC with channel allowlist, CSP, single-instance lock, electron-builder targets, vitest, eslint, prettier |
 | M1 shared DQL package | done: 220 vitest tests pass, typecheck and lint clean, `electron-vite build` succeeds |
 | M2 auth + CF client | done (2026-09-10, Windows session): discovery, undici http with TLS options, UAA grants + TokenManager, passcode window, CC v3 orgs/spaces/apps, connection store, IPC `connection:*`/`auth:*`/`cf:*`; 336 tests, typecheck/lint/build clean. Not yet exercised against a real foundation. |
-| M3 Log Cache streaming | **next** |
-| M4 storage, M5 query engine, M6+ UI | not started |
+| M3 Log Cache streaming | done (2026-09-10): `LogCacheClient.read`, `LogPoller` (recent backfill, forward tail with overlap dedupe, immediate re-read on full page, backoff + Retry-After, auth pause/resume, abort), mock Log Cache route; 361 tests, typecheck/lint/build clean. Not yet exercised against a real foundation. |
+| M4 storage | **next** |
+| M5 query engine, M6+ UI | not started |
 
 `pnpm dev` was verified on Windows on 2026-09-10 (window shows the placeholder with the app version). The M2
 code has only been tested against the in-process mock (`test/fixtures/mock-cf.ts`); the first real-foundation
@@ -69,7 +70,10 @@ src/main/cf/errors.ts         CfError hierarchy + httpStatusError / mapNetworkEr
 src/main/cf/http.ts           HttpClient over undici Agent (skipSslValidation, caCertPem, timeouts), json(req, zodSchema)
 src/main/cf/discovery.ts      normalizeApiUrl, discoverEndpoints, guessLogCacheUrl
 src/main/cf/uaa.ts            UaaClient grants, TokenSet/TokenStore, TokenManager, authStatusOf, decodeJwtPayload
-src/main/cf/cc-client.ts      CcClient.listOrgs/listSpaces/listApps with pagination + one 401 retry
+src/main/cf/authorized.ts     getJsonWithAuth(http, tokens, url, schema): bearer GET, one 401 refresh+retry, reportUnauthorized
+src/main/cf/cc-client.ts      CcClient.listOrgs/listSpaces/listApps with pagination (uses authorized.ts)
+src/main/cf/log-cache.ts      LogCacheClient.read(sourceId, {startTimeNs,endTimeNs,limit,descending}) -> LogEnvelope[]; compareNs
+src/main/cf/poller.ts         LogPoller: start/stop/resume, status, recent backfill + forward tail (see M3 section)
 src/main/cf/passcode-window.ts openPasscodeWindow (per-connection partition), extractPasscode (pure)
 src/main/cf/connection-manager.ts ConnectionManager: profiles CRUD, test(), authStatus(), runtime(id) cache
 src/main/store/connections.ts ConnectionStore: connections.json (profiles + encrypted tokens), Encryptor interface
@@ -78,10 +82,11 @@ src/preload/index.ts          exposes window.api = { invoke(channel, req), on(ev
 src/shared/ipc/contracts.ts   IpcContracts, INVOKE_CHANNELS, PushEvents, PUSH_EVENTS (add channels here first)
 src/shared/model/connection.ts ConnectionInput/Profile, AuthMode, AuthStatus, PasscodeStartResult
 src/shared/model/cf.ts        CfEndpoints, CfOrg, CfSpace, CfApp
+src/shared/model/log.ts       LogEnvelope (timestampNs string, sourceId, instanceId, appName?, sourceType?, stream, payload, tags)
 src/shared/regions.ts         BTP_REGIONS catalogue, btpApiUrl(region), btpRegionFromApiUrl(url)
 src/shared/dql/               ast, errors, tokenizer, parser, evaluator, wildcard, cursor, stringify, index + __tests__
 src/renderer/src/App.tsx      placeholder UI
-test/fixtures/mock-cf.ts      node:http(s) mock of API root + UAA + CC v3 with mutable state (startMockCf)
+test/fixtures/mock-cf.ts      node:http(s) mock of API root + UAA + CC v3 + Log Cache read with mutable state (startMockCf, addLogs)
 test/fixtures/tls/            self-signed localhost cert/key for TLS option tests (valid until 2036)
 ```
 
@@ -158,15 +163,43 @@ test/fixtures/tls/            self-signed localhost cert/key for TLS option test
 - The mock (`startMockCf`) serves UAA under `<base>/uaa` (so prefix handling is tested), caps `per_page` at 2 to
   force pagination, and exposes `state.validAccessTokens/validRefreshTokens/failNextCc/failNextUaa/notCf`.
 
-## Next milestone: M3 Log Cache streaming (see plan section "CF client", `log-cache.ts` + `poller.ts`)
+## M3 Log Cache streaming: how it works (done)
 
-Create `src/main/cf/log-cache.ts` (`read(sourceId, {startTimeNs, endTimeNs, limit, descending})` through
-`HttpClient.json` + `TokenManager`, envelope zod schema, base64 payload decode, ns timestamps as strings/bigint)
-and `src/main/cf/poller.ts` (`--recent` = one descending read limit 1000 reversed; live = walk forward from
-cursor, immediate re-read when a page is full, poll interval default 1 s, 2 s overlap window for dedupe,
-exponential backoff 1->30 s on 5xx/network honouring `retryAfterMs`, `AbortController` stop, pause on
-`auth:required`). Add `ConnectionRuntime.logCache`. Extend `test/fixtures/mock-cf.ts` with
-`/logcache/api/v1/read/:sourceId` (pages, duplicates, out-of-order, 401 -> refresh, 500 backoff with fake timers).
+- `LogCacheClient.read` -> `GET {log_cache}/api/v1/read/<guid>?envelope_types=LOG&limit=<=1000[&start_time&end_time&descending]`
+  via `getJsonWithAuth`. Only envelopes with a `log` member are returned; payload is base64-decoded, `stream` is
+  `OUT|ERR`, `appName`/`sourceType` come from tags. Timestamps stay decimal strings (`compareNs` for ordering).
+- `LogPoller` (one per app stream) runs a single loop: optional backfill (`recent`: one descending read, page
+  delivered oldest-first, cursor = last ts + 1) then forward reads from `cursor`. After a full page it re-reads
+  immediately from `cursor`; otherwise it sleeps `pollIntervalMs` (1 s) and re-reads from
+  `max(cursor - overlapMs, floor)` where `floor` is the start position (fromNs / now / end of backfill), so
+  late arrivals within 2 s are caught but nothing before the start is ever read. Duplicates are dropped with an
+  in-memory key set (`ts instance stream payload`) pruned to the overlap window; storage (M4) must still use
+  `INSERT OR IGNORE` because a restart loses the set.
+- `onBatch` may be async; the batch is only marked seen and the cursor only advanced after it resolves, so a
+  writer failure leads to backoff and re-delivery of the same envelopes.
+- Errors: `AUTH_REQUIRED|AUTH_FAILED` -> state `paused-auth` until `resume()` (call it after a successful login;
+  M4's StreamManager should do this on `auth:changed` with `loggedIn`). Everything else -> state `backoff` with
+  exponential wait 1 s -> 30 s (reset after success), `retryAfterMs` honoured up to 5 min. `stop()` aborts the
+  in-flight request and any sleep and resolves once the loop reports `stopped`.
+- `sleep` and `nowNs` are injectable; tests use a manual gate (`Gate` in `poller.test.ts`) instead of fake timers
+  so real HTTP to the mock keeps working. Mock knobs: `state.logs`, `addLogs(sourceId, messages, startNs, stepNs)`,
+  `logCacheLimitCap`, `failLogCache` (queue), `scrambleLogCache`.
+
+## Next milestone: M4 storage (see plan sections "SQLite schema", "Ingest pipeline")
+
+Create `src/main/db/workspace-manager.ts` (workspace files under `<userData>/workspaces/<slug>-<id>.sqlite`,
+WAL, `synchronous=NORMAL`, `user_version` migrations, one open at a time, `workspace:*` IPC),
+`src/main/db/schema.ts` (tables from the plan), `src/main/ingest/parser.ts` (LogEnvelope -> parsed entry:
+message/level from JSON `msg|message|text` and `level|severity|lvl`, `props` = top-level JSON keys, `dedupeKey`),
+`src/main/ingest/writer.ts` (per-workspace batched transaction every 250 ms or 500 entries, `INSERT OR IGNORE`,
+upsert `session_props`, update `log_sessions` counts/`last_ts_ns`, backpressure > 20k queued, emit
+`stream:batch {sessionId, inserted, totalCount, latestId}`), `src/main/ingest/stream-manager.ts`
+(`Map<sessionId, {poller, status}>`, start/stop, resume from `last_ts_ns`, stop all on workspace switch, resume
+pollers on `auth:changed` loggedIn, `stream:status` events) and the `session:*` IPC channels. better-sqlite3 is
+already a dependency and rebuilt for Electron by `postinstall`; vitest tests can use it with plain Node only if
+the native module matches the Node ABI, so run DB tests against a temp file with the Node build or via
+`electron-vite`'s vitest setup (check `pnpm test` first; if it fails on the .node binary, use
+`npx @electron/rebuild -f -w better-sqlite3` before/after tests or keep two installs).
 
 ## Platform notes
 
