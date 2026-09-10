@@ -1,4 +1,4 @@
-import type { PreloadApi } from './index';
+import type { PreloadApi } from '../shared/ipc/bridge';
 
 declare global {
   interface Window {

@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { PreloadApi } from '@shared/ipc/bridge';
 import {
   INVOKE_CHANNELS,
   PUSH_EVENTS,
@@ -10,7 +11,7 @@ import {
 const invokeSet = new Set<string>(INVOKE_CHANNELS);
 const eventSet = new Set<string>(PUSH_EVENTS);
 
-const api = {
+const api: PreloadApi = {
   invoke<K extends keyof IpcContracts>(
     channel: K,
     req: IpcContracts[K]['req'],
@@ -27,5 +28,5 @@ const api = {
   },
 };
 
-export type PreloadApi = typeof api;
+export type { PreloadApi };
 contextBridge.exposeInMainWorld('api', api);

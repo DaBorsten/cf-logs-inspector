@@ -9,5 +9,6 @@ export default defineConfig({
     globals: true,
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'test/**/*.test.ts'],
     environmentMatchGlobs: [['src/renderer/**', 'jsdom']],
+    setupFiles: ['test/setup-dom.ts'],
   },
 });

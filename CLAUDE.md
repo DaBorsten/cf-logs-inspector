@@ -37,8 +37,9 @@ deliberately does not depend on the `cf` CLI.
 | M3 Log Cache streaming | done (2026-09-10): `LogCacheClient.read`, `LogPoller` (recent backfill, forward tail with overlap dedupe, immediate re-read on full page, backoff + Retry-After, auth pause/resume, abort), mock Log Cache route; 361 tests, typecheck/lint/build clean. Not yet exercised against a real foundation. |
 | M4 storage | done (2026-09-10): WorkspaceManager (registry + one open SQLite file, WAL, migrations), schema v1, envelope parser, batched Writer with retention, StreamManager (sessions <-> pollers), IPC `workspace:*`/`session:*`, push `stream:batch`/`stream:status`; 440 tests. |
 | M5 query engine | done (2026-09-10): DQL->SQL compiler, entry query/count/get/values, props list, time filters, snapshot paging, IPC `entries:*` + `props:list`; 100-query SQL-vs-evaluator equivalence suite; 582 tests. |
-| M6 app shell + workspaces + connections UI | **next** |
-| M7+ UI | not started |
+| M6 app shell + workspaces + connections UI | done (2026-09-10): Tailwind 4 + Radix primitives, TanStack Query, zustand; AppShell (TitleBar/SidePanel/StatusBar), theme, workspace switcher + manage dialog, connections panel/form, login dialog (password / origin / passcode + manual paste), auth:required toasts; in-memory IPC mock for jsdom tests; 597 tests. Still no real-foundation check. |
+| M7 streams panel | **next** |
+| M8+ UI | not started |
 
 `pnpm dev` was verified on Windows on 2026-09-10 (window shows the placeholder with the app version). The M2
 code has only been tested against the in-process mock (`test/fixtures/mock-cf.ts`); the first real-foundation
@@ -93,7 +94,22 @@ src/main/cf/passcode-window.ts openPasscodeWindow (per-connection partition), ex
 src/main/cf/connection-manager.ts ConnectionManager: profiles CRUD, test(), authStatus(), runtime(id) cache
 src/main/store/connections.ts ConnectionStore: connections.json (profiles + encrypted tokens), Encryptor interface
 src/main/store/safe-storage.ts safeStorageEncryptor (only file besides index.ts/passcode-window/ipc that imports electron)
-src/preload/index.ts          exposes window.api = { invoke(channel, req), on(event, cb) } with allowlists
+src/preload/index.ts          exposes window.api (PreloadApi from src/shared/ipc/bridge.ts) with channel/event allowlists
+src/shared/ipc/bridge.ts      PreloadApi interface (implemented by preload and by the renderer mock)
+src/renderer/src/main.tsx     imports styles/globals.css; installs the mock backend when window.api is missing (browser dev)
+src/renderer/src/App.tsx      Providers (QueryClient + Toaster) -> AppShell
+src/renderer/src/api/client.ts     invoke(channel, req) unwrapping IpcResult -> throws ApiError{code}; onEvent; errorMessage
+src/renderer/src/api/useApiEvent.ts useApiEvent(event, handler)
+src/renderer/src/api/mock/mock-api.ts createMockApi/installMockApi: full in-memory IpcContracts implementation with seedable state, failures, emit()
+src/renderer/src/queries/     keys.ts (qk), workspaces.ts, connections.ts, sessions.ts (TanStack Query hooks + mutations)
+src/renderer/src/store/ui.ts  zustand UI state (theme, side panel tab, open dialogs) persisted to localStorage
+src/renderer/src/app/         AppShell, TitleBar (workspace switcher, theme menu), SidePanel (tabs), StatusBar, ApiEvents (push -> invalidate/toasts), Providers, theme.ts
+src/renderer/src/components/ui/ button, input (Input/Textarea/NativeSelect), field (Label/Field/ErrorText), badge, dialog, tabs, switch, dropdown-menu, misc (Spinner/EmptyState/Toaster)
+src/renderer/src/features/workspaces/  WorkspaceSwitcher, WorkspaceDialog (create / open file / delete with typed confirm)
+src/renderer/src/features/connections/ ConnectionsPanel, ConnectionForm, ConnectionEditorDialog, LoginDialog
+src/renderer/src/features/sessions/    SessionsPanel (read-only list); features/streams/StreamsPanel (M7 placeholder)
+src/renderer/src/test/render.tsx setupMock(state) + renderWithProviders + sampleConnection for component tests
+src/renderer/src/styles/globals.css Tailwind 4 import, shadcn-style tokens (light/dark via .dark), base layer
 src/shared/ipc/contracts.ts   IpcContracts, INVOKE_CHANNELS, PushEvents, PUSH_EVENTS (add channels here first)
 src/shared/model/connection.ts ConnectionInput/Profile, AuthMode, AuthStatus, PasscodeStartResult
 src/shared/model/cf.ts        CfEndpoints, CfOrg, CfSpace, CfApp
@@ -122,9 +138,17 @@ test/fixtures/tls/            self-signed localhost cert/key for TLS option test
   `pnpm lint` before committing; all three were clean at the last commit.
 - `pnpm test` runs vitest inside Electron's Node (`scripts/test.mjs`, `ELECTRON_RUN_AS_NODE=1`) so the
   Electron-built `better-sqlite3` binary loads; `pnpm test:node` is plain vitest and only works while the
-  binary happens to be ABI-compatible with the system Node. If `better-sqlite3` fails to load in the app,
-  run `pnpm exec electron-rebuild -f -w better-sqlite3` (the `postinstall` `install-app-deps` step did not
-  replace the Node prebuild on Windows/pnpm on 2026-09-10).
+  binary happens to be ABI-compatible with the system Node. `postinstall` is `electron-rebuild -f -w
+  better-sqlite3` because `electron-builder install-app-deps` left the Node prebuild in place under pnpm on
+  Windows (seen twice on 2026-09-10; symptom: NODE_MODULE_VERSION 137 vs 139 in every DB test). After any
+  `pnpm add/install`, if DB tests fail with that message run `pnpm exec electron-rebuild -f -w better-sqlite3`.
+- Renderer components: no Node imports; talk to main only through `api/client.ts` (`invoke`) and TanStack
+  Query hooks in `queries/`; UI state in `store/ui.ts`. Forms use native `<select>` (`NativeSelect`) so
+  jsdom tests can drive them with `userEvent.selectOptions`. Component tests: `setupMock(state)` installs
+  the in-memory backend on `window.api`, `renderWithProviders(<X/>)`, then assert on `mock.state` /
+  `mock.state.calls`; wrap direct zustand updates in `act()`. Push events are simulated with `mock.emit()`.
+- New IPC channel checklist now includes the mock: add the handler in `api/mock/mock-api.ts` (TypeScript
+  fails until every channel is implemented).
 - SQLite integers: `ts_ns` is INTEGER; bind it as `BigInt` and read it back with `CAST(ts_ns AS TEXT)` (or
   `stmt.safeIntegers()`), never as a JS number. `INSERT OR IGNORE` also swallows NOT NULL/CHECK conflicts, so
   keep entries valid before insert; foreign-key violations still abort the flush.
@@ -269,18 +293,45 @@ test/fixtures/tls/            self-signed localhost cert/key for TLS option test
   JS; `a[0].b` style paths appear only in SQL. The equivalence suite in `entry-query.test.ts` runs ~100 queries
   over a 120-row fixture through both engines; extend it whenever the compiler or evaluator changes.
 
-## Next milestone: M6 app shell + workspaces + connections UI (see plan section "Renderer")
+## M6 app shell + workspaces + connections UI: how it works (done)
 
-Backend is complete for the UI to consume: connections/auth/cf, workspaces, sessions, entries queries. Set up
-Tailwind 4 + shadcn/ui (Radix), TanStack Query, zustand; `src/renderer/src/api/client.ts` typed wrapper over
-`window.api.invoke` that unwraps `IpcResult` (throw an `IpcError`-carrying error on `ok:false`) plus
-`useApiEvent` for push events -> `invalidateQueries`; `mock/` backend for renderer-only dev (implements the
-IPC contract over the DQL evaluator). Screens: AppShell (TitleBar with workspace switcher, SidePanel tabs
-Streams/Sessions/Connections, StatusBar), theme toggle, workspace create/open/delete dialog, connections list +
-form (BTP region picker from `BTP_REGIONS`, custom API URL, skip-SSL/CA, auth mode), login dialog state machine
-(password / origin / passcode with `auth:startPasscode` then manual paste fallback), `auth:required` toast.
-First real-foundation check of M2 should happen here. Keep `src/renderer` free of Node imports; renderer tests
-run in jsdom (`environmentMatchGlobs` in vitest.config.ts) with a `window.api` mock.
+- Stack: Tailwind 4 via `@tailwindcss/vite` (renderer plugin in electron.vite.config.ts), hand-written
+  shadcn-style components over the unified `radix-ui` package (Dialog, Tabs, Switch, DropdownMenu, Label),
+  `lucide-react` icons, `sonner` toasts, TanStack Query 5, zustand 5 with `persist`. No shadcn CLI; add
+  components by hand in `components/ui`.
+- Data flow: hooks in `queries/*` wrap `invoke()`; `ApiEvents` (rendered once in AppShell) maps push events:
+  `workspace:changed` -> invalidate workspaces/current/stats/sessions/entries/props; `auth:changed` ->
+  `setQueryData(qk.auth(id))` + invalidate `['cf', id]`; `auth:required` -> error toast with a "Log in" action
+  (`openLogin(id)`), deduped per connection by toast id; `stream:*` -> invalidate sessions (+ stats on batch).
+- Workspaces: `WorkspaceSwitcher` (title bar dropdown) switches or opens the `WorkspaceDialog`
+  (create, open file via `workspace:pickFile` + `workspace:openFile`, reveal, delete with typed-name confirm).
+  `MainArea` shows an empty state when no workspace is open and a stats card otherwise (log table comes in M8).
+- Connections: `ConnectionsPanel` lists profiles with live auth status (`useAuthStatus`), Log in / Log out,
+  edit, delete. `ConnectionForm` covers name, BTP region (grouped by provider from `BTP_REGIONS`, URL derived
+  with `btpApiUrl`) or custom API URL, login mode, origin key, remembered username, TLS options (skip SSL,
+  extra CA), "Test connection" (`connection:test` -> endpoints). Editing detects the region with
+  `btpRegionFromApiUrl`.
+- Login: `LoginDialog` is opened via `useUiStore.openLogin(id)`. Password/origin mode posts
+  `auth:loginPassword` and silently saves a changed username/origin back to the profile. Passcode mode:
+  "Open SSO login window" -> `auth:startPasscode`; `loggedIn` closes, `cancelled` switches to the manual paste
+  form (`auth:passcodeLogin`), which is also reachable directly.
+- Theme: `useThemeEffect` toggles `.dark` on `<html>` from the store (`light|dark|system`, follows the OS in
+  system mode). Sonner's theme follows the same resolver.
+- Main additions: `workspace:pickFile` (Electron `dialog.showOpenDialog`) and `workspace:reveal`
+  (`shell.showItemInFolder`).
+
+## Next milestone: M7 streams panel (see plan section "Renderer" -> Streams panel)
+
+Replace `features/streams/StreamsPanel.tsx`: connection select (only logged-in ones enabled, with a Log in
+shortcut), cascading org -> space pickers (`cf:orgs`, `cf:spaces` via TanStack Query keyed by `qk.orgs/spaces`),
+app multi-select with search (`cf:apps`), `--recent` toggle, "Start streaming" creating a `session:create` +
+`session:start` per app (reuse an existing session for the same app GUID in the workspace instead of creating
+a duplicate), running-streams list with status badge (`stream:status`), poll interval dropdown
+(`session:setInterval`, `POLL_INTERVALS_MS`), stop/clear/delete, deterministic colour tag per app name, and a
+"Log in" prompt when `auth:required` hits a running session's connection. This is the first end-to-end
+integration checkpoint: run `pnpm dev`, add a real connection, log in, start two streams and confirm entries
+count up in the status bar / sessions panel (the table itself arrives in M8). Mock backend already implements
+`cf:*` and `session:*`; extend `MockState.entries` if the panel needs to show counts.
 
 ## Platform notes
 

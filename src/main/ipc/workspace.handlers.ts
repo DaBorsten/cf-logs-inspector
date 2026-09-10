@@ -1,3 +1,4 @@
+import { BrowserWindow, dialog, shell } from 'electron';
 import type { AppContext } from '../context';
 import { handle } from './handle';
 import {
@@ -18,4 +19,23 @@ export function registerWorkspaceHandlers(ctx: AppContext): void {
   handle('workspace:stats', undefined, () => ctx.workspaces.stats());
   handle('workspace:kvGet', kvGetSchema, ({ key }) => ctx.workspaces.kvGet(key));
   handle('workspace:kvSet', kvSetSchema, ({ key, value }) => ctx.workspaces.kvSet(key, value));
+
+  handle('workspace:pickFile', undefined, async (_req, { sender }) => {
+    const win = BrowserWindow.fromWebContents(sender);
+    const opts: Electron.OpenDialogOptions = {
+      title: 'Open workspace',
+      properties: ['openFile'],
+      filters: [
+        { name: 'SQLite workspace', extensions: ['sqlite', 'db', 'sqlite3'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    };
+    const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
+  handle('workspace:reveal', idSchema, ({ id }) => {
+    const ws = ctx.workspaces.list().find((w) => w.id === id);
+    if (ws) shell.showItemInFolder(ws.path);
+  });
 }

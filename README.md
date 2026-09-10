@@ -30,4 +30,5 @@ pnpm package        # electron-builder installers into release/
 - [x] M3 Log Cache streaming: Log Cache read client and per-app poller (`--recent` backfill, live tail with overlap de-duplication, backoff, auth pause/resume)
 - [x] M4 storage: SQLite workspaces (WAL, migrations), envelope parser, batched writer with retention, session/stream manager
 - [x] M5 query engine: DQL-to-SQL compiler (fixed and JSON fields, wildcards, ranges), paged entry queries with time filters and snapshots, value suggestions
-- [ ] M6+ UI
+- [x] M6 app shell: Tailwind/Radix UI, workspace switcher and management, connections with all three login modes, theme
+- [ ] M7+ streams panel, log table, query bar, export

@@ -87,6 +87,10 @@ export interface IpcContracts {
   'workspace:stats': { req: void; res: WorkspaceStats };
   'workspace:kvGet': { req: { key: string }; res: string | null };
   'workspace:kvSet': { req: { key: string; value: string | null }; res: void };
+  /** Native "open file" dialog for .sqlite files; null when cancelled. */
+  'workspace:pickFile': { req: void; res: string | null };
+  /** Reveals the workspace file in the OS file manager. */
+  'workspace:reveal': { req: { id: string }; res: void };
 
   // ---- log sessions / streams (M4) ----
   'session:list': { req: void; res: LogSession[] };
@@ -134,6 +138,8 @@ export const INVOKE_CHANNELS = [
   'workspace:stats',
   'workspace:kvGet',
   'workspace:kvSet',
+  'workspace:pickFile',
+  'workspace:reveal',
   'session:list',
   'session:create',
   'session:start',
