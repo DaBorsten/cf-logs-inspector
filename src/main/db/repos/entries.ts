@@ -16,10 +16,21 @@ export function prepared(db: Db, sql: string): Statement {
   let stmt = map.get(sql);
   if (!stmt) {
     stmt = db.prepare(sql);
+    if (map.size >= MAX_CACHED_STATEMENTS) {
+      // Simple LRU-ish eviction: drop the oldest insertion (Map preserves insertion order).
+      const oldest = map.keys().next().value;
+      if (oldest !== undefined) map.delete(oldest);
+    }
+    map.set(sql, stmt);
+  } else {
+    // Refresh recency.
+    map.delete(sql);
     map.set(sql, stmt);
   }
   return stmt;
 }
+
+const MAX_CACHED_STATEMENTS = 200;
 
 const INSERT_SQL = `INSERT OR IGNORE INTO log_entries
   (session_id, ts_ns, app_guid, app_name, source_type, instance, stream, level, message, is_json, raw, props, dedupe_key)

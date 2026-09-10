@@ -68,3 +68,50 @@ export const sessionIntervalSchema = z.object({
   sessionId,
   pollIntervalMs: z.number().int().min(250).max(300_000),
 });
+
+// ---- entries / query engine ----
+const timeFilterSchema = z.union([
+  z.object({
+    kind: z.literal('relative'),
+    amount: z.number().positive(),
+    unit: z.enum(['m', 'h', 'd']),
+  }),
+  z.object({
+    kind: z.literal('absolute'),
+    fromMs: z.number().optional(),
+    toMs: z.number().optional(),
+  }),
+]);
+const sessionIds = z.array(sessionId).max(1000).optional();
+const dql = z.string().max(10_000).optional();
+const sortSchema = z
+  .array(z.object({ key: z.string().min(1).max(200), dir: z.enum(['asc', 'desc']) }))
+  .max(5)
+  .optional();
+
+export const entryQuerySchema = z.object({
+  sessionIds,
+  dql,
+  time: timeFilterSchema.optional(),
+  sort: sortSchema,
+  snapshotId: z.number().int().nonnegative().optional(),
+  paging: z.object({
+    limit: z.number().int().min(1).max(1000),
+    offset: z.number().int().nonnegative(),
+  }),
+});
+export const entryCountSchema = z.object({
+  sessionIds,
+  dql,
+  time: timeFilterSchema.optional(),
+  snapshotId: z.number().int().nonnegative().optional(),
+});
+export const entryIdSchema = z.object({ id: z.number().int().positive() });
+export const valuesQuerySchema = z.object({
+  field: z.string().min(1).max(200),
+  prefix: z.string().max(200).optional(),
+  sessionIds,
+  time: timeFilterSchema.optional(),
+  limit: z.number().int().min(1).max(500).optional(),
+});
+export const propsListSchema = z.object({ sessionIds });

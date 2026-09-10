@@ -29,5 +29,5 @@ pnpm package        # electron-builder installers into release/
 - [x] M2 auth + CF client (`src/main/cf`): endpoint discovery, UAA password / custom-IdP origin / SSO passcode login with token refresh, encrypted token store, CF v3 orgs/spaces/apps
 - [x] M3 Log Cache streaming: Log Cache read client and per-app poller (`--recent` backfill, live tail with overlap de-duplication, backoff, auth pause/resume)
 - [x] M4 storage: SQLite workspaces (WAL, migrations), envelope parser, batched writer with retention, session/stream manager
-- [ ] M5 query engine
+- [x] M5 query engine: DQL-to-SQL compiler (fixed and JSON fields, wildcards, ranges), paged entry queries with time filters and snapshots, value suggestions
 - [ ] M6+ UI

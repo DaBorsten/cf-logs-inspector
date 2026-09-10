@@ -36,8 +36,9 @@ deliberately does not depend on the `cf` CLI.
 | M2 auth + CF client | done (2026-09-10, Windows session): discovery, undici http with TLS options, UAA grants + TokenManager, passcode window, CC v3 orgs/spaces/apps, connection store, IPC `connection:*`/`auth:*`/`cf:*`; 336 tests, typecheck/lint/build clean. Not yet exercised against a real foundation. |
 | M3 Log Cache streaming | done (2026-09-10): `LogCacheClient.read`, `LogPoller` (recent backfill, forward tail with overlap dedupe, immediate re-read on full page, backoff + Retry-After, auth pause/resume, abort), mock Log Cache route; 361 tests, typecheck/lint/build clean. Not yet exercised against a real foundation. |
 | M4 storage | done (2026-09-10): WorkspaceManager (registry + one open SQLite file, WAL, migrations), schema v1, envelope parser, batched Writer with retention, StreamManager (sessions <-> pollers), IPC `workspace:*`/`session:*`, push `stream:batch`/`stream:status`; 440 tests. |
-| M5 query engine | **next** |
-| M6+ UI | not started |
+| M5 query engine | done (2026-09-10): DQL->SQL compiler, entry query/count/get/values, props list, time filters, snapshot paging, IPC `entries:*` + `props:list`; 100-query SQL-vs-evaluator equivalence suite; 582 tests. |
+| M6 app shell + workspaces + connections UI | **next** |
+| M7+ UI | not started |
 
 `pnpm dev` was verified on Windows on 2026-09-10 (window shows the placeholder with the app version). The M2
 code has only been tested against the in-process mock (`test/fixtures/mock-cf.ts`); the first real-foundation
@@ -70,7 +71,11 @@ src/main/ipc/*.handlers.ts    connection, auth (passcode window), cf, workspace,
 src/main/db/schema.ts         MIGRATIONS[] (user_version steps), applyPragmas, migrate
 src/main/db/workspace-manager.ts WorkspaceManager: registry (workspaces.json), create/openById/openFile/delete/openLastOrDefault, db(), stats, kv, onBeforeClose hooks
 src/main/db/repos/sessions.ts log_sessions CRUD, recordBatch, recountSessions, clearSessionData
-src/main/db/repos/entries.ts  insertEntries (INSERT OR IGNORE, BigInt ts), retention deletes, session_props upsert/list, prepared() cache
+src/main/db/repos/entries.ts  insertEntries (INSERT OR IGNORE, BigInt ts), retention deletes, session_props upsert/list, prepared() LRU cache (200)
+src/main/db/query-compiler.ts compileDql(ast) -> {sql, params}; jsonPaths, sortExpression, TS_ISO_EXPR (see M5 section)
+src/main/db/entry-query.ts    queryEntries, countEntriesFor, getEntry, distinctValues, listPropInfos (base predicate + compiled DQL)
+src/main/db/time.ts           resolveTimeFilter(filter, nowMs) -> {fromNs?, toNs?}, isoToNs, msToNs
+src/main/ipc/entries.handlers.ts entries:query/count/get/values, props:list
 src/main/ingest/parser.ts     parseEnvelope -> ParsedEntry (message/level/props/dedupeKey), normalizeLevel, levelFromText
 src/main/ingest/writer.ts     Writer: batched transaction (250 ms / 500 rows), props, retention, stream:batch events
 src/main/ingest/stream-manager.ts StreamManager: sessions <-> LogPoller, start/stop/setInterval/clear/delete/stopAll, handleAuthChanged
@@ -96,6 +101,8 @@ src/shared/model/log.ts       LogEnvelope (timestampNs string, sourceId, instanc
 src/shared/model/log-entry.ts ParsedEntry (stored row shape), LEVELS
 src/shared/model/session.ts   LogSession, SessionStatus, SessionCreateInput, StreamBatchEvent, StreamStatusEvent, POLL_INTERVALS_MS
 src/shared/model/workspace.ts WorkspaceInfo, WorkspaceStats, RetentionSettings, DEFAULT_RETENTION
+src/shared/model/fields.ts    FIXED_FIELDS (name/aliases -> column/kind), TEXT_FIELDS, DYNAMIC_FIELD_RE, resolveFixedField, entryFieldKind
+src/shared/model/query.ts     EntryQuery, TimeFilter, SortSpec, EntryRow/EntryDetail/EntryPage, EntryCount, ValuesQuery, PropInfo
 src/shared/regions.ts         BTP_REGIONS catalogue, btpApiUrl(region), btpRegionFromApiUrl(url)
 src/shared/dql/               ast, errors, tokenizer, parser, evaluator, wildcard, cursor, stringify, index + __tests__
 src/renderer/src/App.tsx      placeholder UI
@@ -234,19 +241,46 @@ test/fixtures/tls/            self-signed localhost cert/key for TLS option test
 - Retention defaults: 500k rows per session, 2M per workspace (`DEFAULT_RETENTION`); not yet user-configurable
   (M12 settings UI; store in `kv` when that lands).
 
-## Next milestone: M5 query engine (see plan section "SQL compilation" and the `EntryQuery` contract)
+## M5 query engine: how it works (done)
 
-Create `src/main/db/query-compiler.ts` (DQL AST -> SQL: fixed field allowlist `ts|timestamp -> ts_ns`,
-`app -> app_name`, `source_type`, `instance`, `stream`, `level`, `message`, `session -> session_id`; dynamic
-names `/^[A-Za-z_@][\w-]*(\.[A-Za-z_@][\w-]*)*$/` -> `json_extract(props, ?)` with bound `$.path`; `LIKE ? ESCAPE '\'`
-via `segmentsToLike`/`containsToLike` from `src/shared/dql/wildcard.ts`; numeric compare through
-`CAST(.. AS REAL)` guarded by `json_type`; `exists` -> `IS NOT NULL`; base predicate
-`session_id IN (...) AND ts_ns BETWEEN ? AND ?` first; allowlisted sort keys with `id` tiebreaker; prepared
-statement LRU), `src/main/db/repos/entries.ts` additions (`query`, `count {total, maxId}`, `get(id)`, `values(field)`
-for autocomplete), `props:list` from `listProps`, time filter resolution (relative -> absolute ns in main),
-snapshot paging (`id <= snapshotId`), and IPC `entries:{query,count,get,values}` + `props:list`. Test SQL vs
-`evaluate()` equivalence on fixtures in a temp database (both must agree on the DQL semantics listed above,
-including `textFields = ['message']` substring vs keyword exact match and range typing).
+- Field model (`src/shared/model/fields.ts`): fixed fields with aliases map to columns and kinds:
+  `timestamp|ts|@timestamp|time` (date, `ts_ns`), `app|app_name|appName` (keyword), `app_guid`, `source_type|
+  sourceType|source`, `instance` (number), `stream`, `level|severity`, `message|msg` (text), `raw` (text),
+  `session|session_id` (number), `id` (number). Free-text terms search `message OR raw`. Anything else is a
+  dynamic property in `props` and must match `DYNAMIC_FIELD_RE`.
+- `compileDql(ast)` returns `{sql, params}` with positional `?` params. Semantics mirror the evaluator:
+  text fields substring (`LIKE '%x%' ESCAPE '\'`), other fields case-insensitive exact via `CAST(.. AS TEXT) LIKE`
+  (wildcards -> `segmentsToLike`); `NOT` wraps `COALESCE(.., 0)` so NULLs negate to true; `timestamp` matches
+  against `TS_ISO_EXPR` (ISO with ms) and ranges bind `ts_ns` BigInt (ISO literal via `isoToNs`, numeric = epoch
+  ms); dynamic properties dispatch on `json_type`: object -> no match, array -> `json_each` any scalar element,
+  booleans compare as `true|false`, null -> no match; dotted names try all flattened/nested path compositions
+  (`jsonPaths`, up to 4 segments, evaluator order) joined with OR; wildcard field names walk `json_tree(props)`
+  matching the dotted key path with LIKE. Ranges: numeric when the literal is numeric and the value is a number
+  or fully numeric text (GLOB checks), date via `julianday` when the literal is ISO and the value looks like a
+  date, else text comparison. JSON paths are embedded as SQL string literals (validated names), not bound.
+- `entry-query.ts`: `buildWhere` puts `session_id IN`, `ts_ns >=/<` and `id <= snapshotId` before the DQL;
+  `queryEntries` clamps paging (max 1000), sorts by allowlisted keys with `id` tiebreaker (default `ts_ns DESC`),
+  returns `EntryRow` with `props` parsed (no `raw`; `getEntry` adds it). `countEntriesFor` returns `total`
+  within the snapshot and `maxId` ignoring it (new-entries banner). `distinctValues` groups by value with
+  frequency order and prefix filter (text fields return []). Relative time filters resolve against `nowMs`
+  passed in by the caller (tests inject it).
+- Known divergences from the evaluator, all documented in the compiler header: SQLite case folding is
+  ASCII-only; `1.0`/`1e21` numbers print differently; zoneless ISO strings compare as UTC in SQL but local in
+  JS; `a[0].b` style paths appear only in SQL. The equivalence suite in `entry-query.test.ts` runs ~100 queries
+  over a 120-row fixture through both engines; extend it whenever the compiler or evaluator changes.
+
+## Next milestone: M6 app shell + workspaces + connections UI (see plan section "Renderer")
+
+Backend is complete for the UI to consume: connections/auth/cf, workspaces, sessions, entries queries. Set up
+Tailwind 4 + shadcn/ui (Radix), TanStack Query, zustand; `src/renderer/src/api/client.ts` typed wrapper over
+`window.api.invoke` that unwraps `IpcResult` (throw an `IpcError`-carrying error on `ok:false`) plus
+`useApiEvent` for push events -> `invalidateQueries`; `mock/` backend for renderer-only dev (implements the
+IPC contract over the DQL evaluator). Screens: AppShell (TitleBar with workspace switcher, SidePanel tabs
+Streams/Sessions/Connections, StatusBar), theme toggle, workspace create/open/delete dialog, connections list +
+form (BTP region picker from `BTP_REGIONS`, custom API URL, skip-SSL/CA, auth mode), login dialog state machine
+(password / origin / passcode with `auth:startPasscode` then manual paste fallback), `auth:required` toast.
+First real-foundation check of M2 should happen here. Keep `src/renderer` free of Node imports; renderer tests
+run in jsdom (`environmentMatchGlobs` in vitest.config.ts) with a `window.api` mock.
 
 ## Platform notes
 

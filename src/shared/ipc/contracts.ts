@@ -19,6 +19,15 @@ import type {
   StreamStatusEvent,
 } from '../model/session';
 import type { WorkspaceInfo, WorkspaceStats } from '../model/workspace';
+import type {
+  EntryCount,
+  EntryCountQuery,
+  EntryDetail,
+  EntryPage,
+  EntryQuery,
+  PropInfo,
+  ValuesQuery,
+} from '../model/query';
 
 export interface IpcError {
   code: string;
@@ -88,6 +97,17 @@ export interface IpcContracts {
   /** Deletes the session's entries (stops it first); the session stays. */
   'session:clear': { req: { sessionId: number }; res: LogSession };
   'session:delete': { req: { sessionId: number }; res: void };
+
+  // ---- query engine (M5) ----
+  /** One page of entries; DQL is parsed/compiled in main, relative time filters resolved at call time. */
+  'entries:query': { req: EntryQuery; res: EntryPage };
+  /** Matching total (within the snapshot) and the highest matching id (ignoring the snapshot). */
+  'entries:count': { req: EntryCountQuery; res: EntryCount };
+  'entries:get': { req: { id: number }; res: EntryDetail };
+  /** Distinct values of a field for autocomplete (frequency order). */
+  'entries:values': { req: ValuesQuery; res: string[] };
+  /** Discovered top-level JSON keys with type/count/sample. */
+  'props:list': { req: { sessionIds?: number[] }; res: PropInfo[] };
 }
 
 export const INVOKE_CHANNELS = [
@@ -121,6 +141,11 @@ export const INVOKE_CHANNELS = [
   'session:setInterval',
   'session:clear',
   'session:delete',
+  'entries:query',
+  'entries:count',
+  'entries:get',
+  'entries:values',
+  'props:list',
 ] as const satisfies readonly (keyof IpcContracts)[];
 
 export interface PushEvents {
