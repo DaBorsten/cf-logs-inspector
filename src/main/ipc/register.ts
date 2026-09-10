@@ -1,32 +1,29 @@
-import { ipcMain } from 'electron';
+import { app } from 'electron';
 import { parse } from '@shared/dql';
-import type { IpcContracts } from '@shared/ipc/contracts';
+import type { AppContext } from '../context';
+import { registerAuthHandlers } from './auth.handlers';
+import { registerCfHandlers } from './cf.handlers';
+import { registerConnectionHandlers } from './connection.handlers';
+import { handle } from './handle';
+import { validateDqlSchema } from './schemas';
 
-type Handler<K extends keyof IpcContracts> = (
-  req: IpcContracts[K]['req'],
-) => Promise<IpcContracts[K]['res']> | IpcContracts[K]['res'];
-
-function handle<K extends keyof IpcContracts>(channel: K, handler: Handler<K>): void {
-  ipcMain.handle(channel, async (_event, req: IpcContracts[K]['req']) => {
-    try {
-      return { ok: true, value: await handler(req) };
-    } catch (err) {
-      const e = err as { code?: string; message?: string; details?: unknown };
-      return {
-        ok: false,
-        error: { code: e.code ?? 'INTERNAL', message: e.message ?? String(err), details: e.details },
-      };
-    }
-  });
-}
-
-/** Registers all invoke handlers. Domain handlers are added milestone by milestone. */
-export function registerIpcHandlers(): void {
-  handle('app:version', () => process.env['npm_package_version'] ?? '0.0.0');
-  handle('entries:validateDql', ({ dql }) => {
+/** Registers all invoke handlers. Domain handlers live in `*.handlers.ts` files. */
+export function registerIpcHandlers(ctx: AppContext): void {
+  handle('app:version', undefined, () => app.getVersion());
+  handle('entries:validateDql', validateDqlSchema, ({ dql }) => {
     const result = parse(dql);
     return result.ok
       ? { ok: true }
-      : { ok: false, error: { message: result.error.message, start: result.error.start, end: result.error.end } };
+      : {
+          ok: false,
+          error: {
+            message: result.error.message,
+            start: result.error.start,
+            end: result.error.end,
+          },
+        };
   });
+  registerConnectionHandlers(ctx);
+  registerAuthHandlers(ctx);
+  registerCfHandlers(ctx);
 }

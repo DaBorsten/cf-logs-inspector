@@ -1,7 +1,12 @@
 import { app, BrowserWindow, session, shell } from 'electron';
 import { join } from 'node:path';
 import log from 'electron-log/main';
+import { ConnectionManager } from './cf/connection-manager';
+import type { AppContext } from './context';
 import { registerIpcHandlers } from './ipc/register';
+import { pushEvent } from './ipc/push';
+import { ConnectionStore } from './store/connections';
+import { safeStorageEncryptor } from './store/safe-storage';
 
 log.initialize();
 log.transports.file.level = 'info';
@@ -54,12 +59,30 @@ function installCsp(): void {
   });
 }
 
+function createContext(): AppContext {
+  const logger = log.scope('cf');
+  const store = new ConnectionStore({
+    filePath: join(app.getPath('userData'), 'connections.json'),
+    encryptor: safeStorageEncryptor(logger),
+    logger,
+  });
+  const connections = new ConnectionManager({
+    store,
+    logger,
+    onAuthRequired: (connectionId, reason) => pushEvent('auth:required', { connectionId, reason }),
+    onAuthChanged: (connectionId, status) => pushEvent('auth:changed', { connectionId, status }),
+  });
+  return { connections, logger };
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
+  let ctx: AppContext | undefined;
   app.whenReady().then(() => {
     installCsp();
-    registerIpcHandlers();
+    ctx = createContext();
+    registerIpcHandlers(ctx);
     createMainWindow();
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
@@ -68,5 +91,9 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
+  });
+
+  app.on('before-quit', () => {
+    void ctx?.connections.disposeAll();
   });
 }
