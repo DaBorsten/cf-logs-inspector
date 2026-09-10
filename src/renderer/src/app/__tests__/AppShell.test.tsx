@@ -42,7 +42,7 @@ describe('AppShell', () => {
     await user.click(screen.getByRole('tab', { name: 'Sessions' }));
     expect(await screen.findByText(/no log sessions yet/i)).toBeInTheDocument();
     await user.click(screen.getByRole('tab', { name: 'Streams' }));
-    expect(await screen.findByText(/stream picker coming next/i)).toBeInTheDocument();
+    expect(await screen.findByLabelText('Connection')).toBeInTheDocument();
     expect(mock.state.calls.some((c) => c.channel === 'session:list')).toBe(true);
   });
 

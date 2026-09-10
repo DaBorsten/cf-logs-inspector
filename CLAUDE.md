@@ -38,8 +38,9 @@ deliberately does not depend on the `cf` CLI.
 | M4 storage | done (2026-09-10): WorkspaceManager (registry + one open SQLite file, WAL, migrations), schema v1, envelope parser, batched Writer with retention, StreamManager (sessions <-> pollers), IPC `workspace:*`/`session:*`, push `stream:batch`/`stream:status`; 440 tests. |
 | M5 query engine | done (2026-09-10): DQL->SQL compiler, entry query/count/get/values, props list, time filters, snapshot paging, IPC `entries:*` + `props:list`; 100-query SQL-vs-evaluator equivalence suite; 582 tests. |
 | M6 app shell + workspaces + connections UI | done (2026-09-10): Tailwind 4 + Radix primitives, TanStack Query, zustand; AppShell (TitleBar/SidePanel/StatusBar), theme, workspace switcher + manage dialog, connections panel/form, login dialog (password / origin / passcode + manual paste), auth:required toasts; in-memory IPC mock for jsdom tests; 597 tests. Still no real-foundation check. |
-| M7 streams panel | **next** |
-| M8+ UI | not started |
+| M7 streams panel | done (2026-09-10): connection/org/space pickers, app multi-select with filter, recent toggle, start (reuse existing session per app), stream list with stop/resume, poll interval, clear/delete, login shortcut; 603 tests. End-to-end against a real foundation still pending. |
+| M8 log table core | **next** |
+| M9+ UI | not started |
 
 `pnpm dev` was verified on Windows on 2026-09-10 (window shows the placeholder with the app version). The M2
 code has only been tested against the in-process mock (`test/fixtures/mock-cf.ts`); the first real-foundation
@@ -107,7 +108,11 @@ src/renderer/src/app/         AppShell, TitleBar (workspace switcher, theme menu
 src/renderer/src/components/ui/ button, input (Input/Textarea/NativeSelect), field (Label/Field/ErrorText), badge, dialog, tabs, switch, dropdown-menu, misc (Spinner/EmptyState/Toaster)
 src/renderer/src/features/workspaces/  WorkspaceSwitcher, WorkspaceDialog (create / open file / delete with typed confirm)
 src/renderer/src/features/connections/ ConnectionsPanel, ConnectionForm, ConnectionEditorDialog, LoginDialog
-src/renderer/src/features/sessions/    SessionsPanel (read-only list); features/streams/StreamsPanel (M7 placeholder)
+src/renderer/src/features/sessions/    SessionsPanel (read-only list)
+src/renderer/src/features/streams/     StreamsPanel (guards) -> StreamPicker (connection/org/space/apps, recent, start) + StreamList (rows with controls)
+src/renderer/src/queries/cf.ts         useOrgs/useSpaces/useApps (enabled only while logged in)
+src/renderer/src/queries/sessions.ts   useSessions + useStartStreams (create-or-reuse + start per app), start/stop/setInterval/clear/delete mutations
+src/renderer/src/lib/colors.ts         appHue/appColor: deterministic colour tag per app name
 src/renderer/src/test/render.tsx setupMock(state) + renderWithProviders + sampleConnection for component tests
 src/renderer/src/styles/globals.css Tailwind 4 import, shadcn-style tokens (light/dark via .dark), base layer
 src/shared/ipc/contracts.ts   IpcContracts, INVOKE_CHANNELS, PushEvents, PUSH_EVENTS (add channels here first)
@@ -320,18 +325,38 @@ test/fixtures/tls/            self-signed localhost cert/key for TLS option test
 - Main additions: `workspace:pickFile` (Electron `dialog.showOpenDialog`) and `workspace:reveal`
   (`shell.showItemInFolder`).
 
-## Next milestone: M7 streams panel (see plan section "Renderer" -> Streams panel)
+## M7 streams panel: how it works (done)
 
-Replace `features/streams/StreamsPanel.tsx`: connection select (only logged-in ones enabled, with a Log in
-shortcut), cascading org -> space pickers (`cf:orgs`, `cf:spaces` via TanStack Query keyed by `qk.orgs/spaces`),
-app multi-select with search (`cf:apps`), `--recent` toggle, "Start streaming" creating a `session:create` +
-`session:start` per app (reuse an existing session for the same app GUID in the workspace instead of creating
-a duplicate), running-streams list with status badge (`stream:status`), poll interval dropdown
-(`session:setInterval`, `POLL_INTERVALS_MS`), stop/clear/delete, deterministic colour tag per app name, and a
-"Log in" prompt when `auth:required` hits a running session's connection. This is the first end-to-end
-integration checkpoint: run `pnpm dev`, add a real connection, log in, start two streams and confirm entries
-count up in the status bar / sessions panel (the table itself arrives in M8). Mock backend already implements
-`cf:*` and `session:*`; extend `MockState.entries` if the panel needs to show counts.
+- `StreamsPanel` guards (no workspace / loading / no connections -> empty states), then renders
+  `StreamPicker` above `StreamList`.
+- `StreamPicker` keeps its selection in `useUiStore.streamPicker` (connection, org, space, recent; persisted)
+  so tab switches do not lose it; stale ids fall back gracefully (first connection, empty org/space). Orgs,
+  spaces and apps load only while the connection's `useAuthStatus` says logged in; otherwise a "Log in" button
+  opens the login dialog. Apps render as a checkbox list with a text filter, "Select all" (skips already
+  streaming apps), an app-state badge and a "streaming" badge for apps with a non-stopped session.
+- Start: `useStartStreams` lists sessions once, then per selected app reuses the session with the same
+  connection + app GUID or creates one (with org/space names), and starts it with the `recent` flag; errors are
+  prefixed with the app name. Everything invalidates `qk.sessions` and `qk.workspaceStats`.
+- `StreamList` rows: colour dot (`appColor`), name, status badge (`streaming|stopped|retrying|login required`),
+  connection / org / space, entry count and last error; stop/resume icon button; inline poll interval select
+  (`POLL_INTERVALS_MS`, restarts a running poller in main); clear and delete with inline confirmation; a "Log in"
+  button for `paused-auth` sessions. No Radix dropdowns in rows (slow and flaky in jsdom; inline controls test
+  fine with `userEvent`).
+
+## Next milestone: M8 log table core (see plan section "Renderer" -> Log table)
+
+The main area still shows a stats card. Build `features/log-table/`: TanStack Table v8 with
+`manualSorting/manualPagination`, TanStack Virtual with fixed row height, pages of 200 via `entries:query`
+keyed by `(query hash, snapshotId, page)` (`useInfiniteQuery` or page cache), snapshot taken from
+`entries:count` (`maxId`) on (re)load, `stream:batch` -> "N new entries" banner (compare `count.maxId` with the
+snapshot) with a click to refresh; fixed columns (timestamp with Local/UTC, app tag with `appColor`, level with
+row tint, source type, instance, message) plus dynamic columns from `props:list` (`json` values via
+`row.props`), column picker/visibility/order/size/pinning persisted per workspace in `kv`
+(`workspace:kvGet/kvSet`, key `layout.columns`), header sort -> `sort` in `EntryQuery`; a temporary plain text
+query input wired to `entries:validateDql` + `entries:query` until M9 brings CodeMirror. Add `entries` to the
+mock backend seed (`MockState.entries`, `EntryDetail[]`) with a small generator for tests. Check the
+`EntryQuery` contract in `src/shared/model/query.ts` and `DEFAULT_SORT`. Keep `raw` out of list rows
+(`entries:get` for the detail view in M11).
 
 ## Platform notes
 

@@ -5,6 +5,13 @@ export type Theme = 'light' | 'dark' | 'system';
 export type SidePanelTab = 'streams' | 'sessions' | 'connections';
 export type ConnectionEditor = { mode: 'create' } | { mode: 'edit'; id: string };
 
+export interface StreamPickerState {
+  connectionId: string | null;
+  orgGuid: string | null;
+  spaceGuid: string | null;
+  recent: boolean;
+}
+
 interface UiState {
   theme: Theme;
   setTheme(theme: Theme): void;
@@ -21,11 +28,21 @@ interface UiState {
   closeConnectionEditor(): void;
   workspaceDialogOpen: boolean;
   setWorkspaceDialogOpen(open: boolean): void;
+  /** Last connection/org/space chosen in the streams picker (survives tab switches and restarts). */
+  streamPicker: StreamPickerState;
+  setStreamPicker(patch: Partial<StreamPickerState>): void;
 }
 
+export const initialStreamPicker: StreamPickerState = {
+  connectionId: null,
+  orgGuid: null,
+  spaceGuid: null,
+  recent: true,
+};
+
 /**
- * Renderer-only UI state. `theme` and the side panel tab persist in localStorage for now; the plan
- * moves global preferences to `<userData>/config.json` via a `settings:*` IPC in M12.
+ * Renderer-only UI state. `theme`, the side panel and the picker selection persist in localStorage for
+ * now; the plan moves global preferences to `<userData>/config.json` via a `settings:*` IPC in M12.
  */
 export const useUiStore = create<UiState>()(
   persist(
@@ -44,6 +61,8 @@ export const useUiStore = create<UiState>()(
       closeConnectionEditor: () => set({ connectionEditor: null }),
       workspaceDialogOpen: false,
       setWorkspaceDialogOpen: (workspaceDialogOpen) => set({ workspaceDialogOpen }),
+      streamPicker: initialStreamPicker,
+      setStreamPicker: (patch) => set((s) => ({ streamPicker: { ...s.streamPicker, ...patch } })),
     }),
     {
       name: 'cf-log-inspector.ui',
@@ -51,6 +70,7 @@ export const useUiStore = create<UiState>()(
         theme: s.theme,
         sidePanelTab: s.sidePanelTab,
         sidePanelOpen: s.sidePanelOpen,
+        streamPicker: s.streamPicker,
       }),
     },
   ),
