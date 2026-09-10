@@ -62,6 +62,29 @@ if (typeof window !== 'undefined') {
       toJSON: () => ({ width, height }),
     } as DOMRect;
   };
+  // CodeMirror measures text with Range rects; jsdom implements neither.
+  const emptyRect = (): DOMRect =>
+    ({
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      toJSON: () => ({}),
+    }) as DOMRect;
+  const emptyRectList = (): DOMRectList =>
+    ({
+      length: 0,
+      item: () => null,
+      [Symbol.iterator]: [][Symbol.iterator],
+    }) as unknown as DOMRectList;
+  const rangeProto = window.Range.prototype as unknown as Record<string, unknown>;
+  if (!rangeProto['getClientRects']) rangeProto['getClientRects'] = emptyRectList;
+  if (!rangeProto['getBoundingClientRect']) rangeProto['getBoundingClientRect'] = emptyRect;
+  if (!proto['getClientRects']) proto['getClientRects'] = emptyRectList;
   if (!('ResizeObserver' in window)) {
     (window as unknown as Record<string, unknown>)['ResizeObserver'] = class {
       observe(): void {}

@@ -115,3 +115,12 @@ export const valuesQuerySchema = z.object({
   limit: z.number().int().min(1).max(500).optional(),
 });
 export const propsListSchema = z.object({ sessionIds });
+
+// ---- saved filters ----
+export const savedFilterSchema = z.object({
+  id: z.number().int().positive().optional(),
+  name: z.string().trim().min(1).max(200),
+  dql: z.string().max(10_000),
+  timeFilter: timeFilterSchema.optional(),
+});
+export const filterIdSchema = z.object({ id: z.number().int().positive() });

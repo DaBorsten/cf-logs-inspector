@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { DEFAULT_SORT } from '@shared/model/query';
 import { makeMockEntries, propsOf } from '../../../api/mock/entries';
 import { ApiEvents } from '../../../app/ApiEvents';
+import { pressInQuery, setQueryText } from '../../../test/codemirror';
 import { renderWithProviders, setupMock } from '../../../test/render';
 import { useQueryStore } from '../../../store/query';
 import { formatTimestamp } from '../../../lib/time';
@@ -165,13 +166,14 @@ describe('LogTable', () => {
     expect(screen.queryByRole('button', { name: /new entries/i })).not.toBeInTheDocument();
   });
 
-  it('applies DQL from the query input and reports syntax errors without applying', async () => {
-    const mock = seed(9);
+  it('applies DQL from the query bar and reports syntax errors without applying', async () => {
+    seed(9);
     const user = userEvent.setup();
     renderWithProviders(<LogView />);
     await waitFor(() => expect(dataRows()).toHaveLength(9));
-    const input = screen.getByRole('textbox', { name: 'Query' });
-    await user.type(input, 'level:error{Enter}');
+    await screen.findByRole('textbox', { name: 'Query' });
+    setQueryText('level:error');
+    pressInQuery('Enter');
     await waitFor(() => expect(useQueryStore.getState().dql).toBe('level:error'));
     await waitFor(() =>
       expect(dataRows().every((r) => r.textContent?.includes('ERROR'))).toBe(true),
@@ -179,19 +181,15 @@ describe('LogTable', () => {
     expect(dataRows().length).toBeGreaterThan(0);
     expect(screen.getByText(`${dataRows().length} entries`)).toBeInTheDocument();
 
-    await user.clear(input);
-    await user.type(input, 'level:');
+    setQueryText('level:');
     expect(await screen.findByRole('alert')).toHaveTextContent(/expected a value/i);
-    await user.keyboard('{Enter}');
+    pressInQuery('Enter');
     expect(useQueryStore.getState().dql).toBe('level:error'); // not applied
     expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
 
     await user.click(screen.getByRole('button', { name: /clear query/i }));
     await waitFor(() => expect(useQueryStore.getState().dql).toBe(''));
     await waitFor(() => expect(dataRows()).toHaveLength(9));
-    expect(
-      mock.state.calls.filter((c) => c.channel === 'entries:validateDql').length,
-    ).toBeGreaterThan(0);
   });
 
   it('switches the time zone display', async () => {

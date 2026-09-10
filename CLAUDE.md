@@ -40,8 +40,9 @@ deliberately does not depend on the `cf` CLI.
 | M6 app shell + workspaces + connections UI | done (2026-09-10): Tailwind 4 + Radix primitives, TanStack Query, zustand; AppShell (TitleBar/SidePanel/StatusBar), theme, workspace switcher + manage dialog, connections panel/form, login dialog (password / origin / passcode + manual paste), auth:required toasts; in-memory IPC mock for jsdom tests; 597 tests. Still no real-foundation check. |
 | M7 streams panel | done (2026-09-10): connection/org/space pickers, app multi-select with filter, recent toggle, start (reuse existing session per app), stream list with stop/resume, poll interval, clear/delete, login shortcut; 603 tests. End-to-end against a real foundation still pending. |
 | M8 log table core | done (2026-09-10): virtualized TanStack table with snapshot paging, new-entries banner, header sort, column resize, column picker (fixed + dynamic props, reorder) persisted per workspace in kv, Local/UTC toggle, plain-text DQL input with live validation; 611 tests. |
-| M9 query bar (CodeMirror) | **next** |
-| M10+ UI | not started |
+| M9 query bar (CodeMirror) | done (2026-09-10): CodeMirror 6 single-line DQL editor with token highlighting, lint squiggles, field/value/operator autocomplete (`entries:values`), Enter/Escape, query history (kv `query.history`), saved filters (`saved_filters` table + `filters:*` IPC); 649 tests. |
+| M10 time filter + auto refresh + tail | **next** |
+| M11+ UI | not started |
 
 `pnpm dev` was verified on Windows on 2026-09-10 (window shows the placeholder with the app version). The M2
 code has only been tested against the in-process mock (`test/fixtures/mock-cf.ts`); the first real-foundation
@@ -117,7 +118,12 @@ src/renderer/src/lib/colors.ts         appHue/appColor: deterministic colour tag
 src/renderer/src/lib/time.ts           formatTimestamp(tsNs, 'local'|'utc'), tsNsToDate, subMillisDigits
 src/renderer/src/store/query.ts        committed dql, sort (toggleSort cycles asc/desc/default), sessionIds, time, tz
 src/renderer/src/features/log-table/   LogView (QueryInput + LogTable), LogTable (virtualized grid), columns.tsx (fixed + p:<key> defs, layout types), useEntries.ts (snapshot/pages/props hooks), useColumnLayout.ts (kv-persisted layout), ColumnPicker
-src/renderer/src/features/query-bar/QueryInput.tsx plain input with entries:validateDql (CodeMirror replaces it in M9)
+src/renderer/src/features/query-bar/ QueryBar (editor + Apply + history/saved-filter panels), QueryEditor (CodeMirror wrapper), dql-language.ts (classifyTokens/dqlHighlight, dqlDiagnostics/dqlLint, completionOptions/dqlCompletionSource, singleLine, dqlTheme)
+src/renderer/src/queries/kv.ts         useKvJson(key, fallback) -> {value, set} per open workspace
+src/renderer/src/queries/filters.ts    useSavedFilters/useSaveFilter/useDeleteFilter
+src/renderer/src/test/codemirror.ts    queryEditorView/setQueryText/pressInQuery test helpers (typing into contenteditable is unreliable in jsdom)
+src/shared/model/filters.ts            SavedFilter/SavedFilterInput, QUERY_HISTORY_KV_KEY/LIMIT
+src/main/db/repos/filters.ts           listFilters/saveFilter (upsert by id or case-insensitive name)/deleteFilter; ipc/filters.handlers.ts
 src/renderer/src/api/mock/entries.ts   makeMockEntries(n, opts) + propsOf(entries) fixture generators
 src/renderer/src/test/render.tsx setupMock(state) + renderWithProviders + sampleConnection for component tests
 src/renderer/src/styles/globals.css Tailwind 4 import, shadcn-style tokens (light/dark via .dark), base layer
@@ -378,17 +384,40 @@ test/fixtures/tls/            self-signed localhost cert/key for TLS option test
 - Vite: `optimizeDeps.include` lists all renderer deps so the dev server never re-optimises mid-session
   (that produced "Invalid hook call" from two React copies once M8 pulled in TanStack Table/Virtual).
 
-## Next milestone: M9 query bar (see plan section "Renderer" -> Query bar)
+## M9 query bar: how it works (done)
 
-Replace `features/query-bar/QueryInput.tsx` with a CodeMirror 6 single-line editor (`@codemirror/state`,
-`@codemirror/view`, `@codemirror/autocomplete`, `@codemirror/lint`, `@lezer/highlight` for a token-based
-highlighter fed by `tokenize()` from `src/shared/dql`), lint squiggles from `parse()` (positions are in the
-AST errors), autocomplete via `completionContextAt(input, cursor)`: fields from `FIXED_FIELDS` + `props:list`,
-values from `entries:values` (debounced, prefix), operators `and/or/not`; Enter submits (no newline), Escape
-reverts; query history (last 50 per workspace in kv `query.history`) and saved filters (`saved_filters` table:
-add `filters:{list,save,delete}` IPC + repo). Keep `useQueryStore.dql` as the committed value and expose
-`setDql`. Tests: RTL with the mock backend (CodeMirror needs `document.createRange`/`getClientRects` polyfills
-in `test/setup-dom.ts`; if it fights jsdom, unit-test the extensions' pure parts and keep one smoke test).
+- `QueryEditor` mounts one `EditorView` (state, view, autocomplete, lint, commands packages; no Lezer
+  grammar). Extensions: `singleLine` (transaction filter flattening newlines), `history`, `dqlHighlight`
+  (ViewPlugin marking tokens from `classifyTokens`: field/operator/keyword/value/quoted/paren/term/error,
+  classes `.cm-dql-*` styled in `dqlTheme` via CSS variables), `dqlLint` (`parse()` error -> one diagnostic),
+  `dqlAutocompletion` (source built on `completionContextAt`: fields insert `name:`, values come from
+  `entries:values` with prefix and are quoted when needed, `*` for exists, `and/or/not` after a clause; no popup
+  on plain whitespace unless Ctrl+Space), keymap (completionKeymap first, then Enter -> onSubmit, Escape ->
+  onCancel, Mod-Space -> startCompletion, history + default keymaps), `contentAttributes` `aria-label="Query"`.
+  External `value` changes are pushed into the view; edits flow out through `onChange`.
+- `QueryBar` owns the draft, validates with `dqlDiagnostics` (shared parser, no IPC round trip), commits via
+  `useQueryStore.setDql`, records applied queries in kv `query.history` (max 50, most recent first, deduped),
+  and hosts two toggle panels: history (pick re-applies) and saved filters (save current dql + time filter
+  under a name, apply sets dql and time, delete with inline confirm). `Escape` first closes an open completion
+  popup (CodeMirror), the second press reverts the draft.
+- Saved filters live per workspace in `saved_filters`; `saveFilter` upserts by id or case-insensitive name and
+  clears the time filter when saving without one.
+- Tests drive the editor through `src/renderer/src/test/codemirror.ts` (`setQueryText`, `pressInQuery`) since
+  `userEvent.type` on contenteditable is unreliable; `test/setup-dom.ts` polyfills `Range#getClientRects` /
+  `getBoundingClientRect` and `Element#getClientRects` for CodeMirror's measurements.
+
+## Next milestone: M10 time filter + auto refresh + tail (see plan section "Renderer" -> Time filter / Auto refresh)
+
+Add `features/time-filter/TimeFilterPopover.tsx` next to the query bar: quick picks (5m, 15m, 1h, 6h, 24h,
+7d -> `{kind:'relative'}`), relative N m/h/d inputs, absolute from/to with `datetime-local` inputs (store ms,
+respect `tz`), "All time" clears; chip showing the active range; write to `useQueryStore.time` (already part of
+`EntryScope`, resolved in main per query). Auto refresh control in the table toolbar (Off/1/2/5/10/30 s,
+persist in `useQueryStore`): on tick call `snapshot.refresh()` when `newCount > 0`; tail mode toggle: keep the
+scroll at the top (newest first) and auto-apply new entries, pausing while the user scrolls away from the top,
+hovers a row, drags a resize handle or has a dialog open; resume when back at the top. Relative time filters
+must re-resolve on refresh (they do: main resolves against `Date.now()` per query, and the snapshot refetch
+re-runs the count). Consider showing "live" state in the status bar. Tests: time filter popover writes the
+expected `TimeFilter`; auto refresh with vi.useFakeTimers + mock `stream:batch`; tail pauses on scroll.
 
 ## Platform notes
 

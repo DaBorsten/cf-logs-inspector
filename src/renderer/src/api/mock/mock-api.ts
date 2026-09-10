@@ -9,6 +9,7 @@ import type { AuthStatus, ConnectionProfile, PasscodeStartResult } from '@shared
 import { entryFieldKind, TEXT_FIELDS } from '@shared/model/fields';
 import type { EntryDetail, EntryRow, PropInfo } from '@shared/model/query';
 import type { LogSession } from '@shared/model/session';
+import type { SavedFilter } from '@shared/model/filters';
 import type { WorkspaceInfo } from '@shared/model/workspace';
 import type { PreloadApi } from '@shared/ipc/bridge';
 
@@ -27,6 +28,7 @@ export interface MockState {
   sessions: LogSession[];
   entries: EntryDetail[];
   props: PropInfo[];
+  filters: SavedFilter[];
   kv: Record<string, string>;
   /** Channels that should fail with this error (consumed once per call). */
   failures: Partial<Record<keyof IpcContracts, { code: string; message: string }>>;
@@ -82,6 +84,7 @@ export function defaultMockState(): MockState {
     sessions: [],
     entries: [],
     props: [],
+    filters: [],
     kv: {},
     failures: {},
     calls: [],
@@ -441,6 +444,33 @@ export function createMockApi(init: Partial<MockState> = {}): MockApi {
         .map(([v]) => v);
     },
     'props:list': () => state.props,
+    'filters:list': () => [...state.filters].sort((a, b) => a.name.localeCompare(b.name)),
+    'filters:save': (req) => {
+      const name = req.name.trim();
+      if (!name) throw { code: 'INVALID_INPUT', message: 'Filter name is required' };
+      const now = Date.now();
+      const existing =
+        state.filters.find((f) => f.id === req.id) ??
+        state.filters.find((f) => f.name.toLowerCase() === name.toLowerCase());
+      const filter: SavedFilter = {
+        id: existing?.id ?? state.filters.reduce((m, f) => Math.max(m, f.id), 0) + 1,
+        name,
+        dql: req.dql.trim(),
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+        ...(req.timeFilter ? { timeFilter: req.timeFilter } : {}),
+      };
+      state.filters = existing
+        ? state.filters.map((f) => (f.id === existing.id ? filter : f))
+        : [...state.filters, filter];
+      return filter;
+    },
+    'filters:delete': ({ id }) => {
+      if (!state.filters.some((f) => f.id === id)) {
+        throw { code: 'NOT_FOUND', message: `Unknown filter ${id}` };
+      }
+      state.filters = state.filters.filter((f) => f.id !== id);
+    },
   };
 
   const api: PreloadApi = {

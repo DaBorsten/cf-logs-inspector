@@ -33,4 +33,5 @@ pnpm package        # electron-builder installers into release/
 - [x] M6 app shell: Tailwind/Radix UI, workspace switcher and management, connections with all three login modes, theme
 - [x] M7 streams panel: org/space/app pickers, start with recent backfill, stream controls (stop, interval, clear, delete)
 - [x] M8 log table: virtualized table with snapshot paging, new-entries banner, sortable/resizable columns, dynamic JSON columns, persisted layout, DQL input
-- [ ] M9+ CodeMirror query bar, time filter and auto refresh, detail view, export
+- [x] M9 query bar: CodeMirror editor with highlighting, lint, autocomplete for fields/values/operators, history, saved filters
+- [ ] M10+ time filter and auto refresh, detail view, export

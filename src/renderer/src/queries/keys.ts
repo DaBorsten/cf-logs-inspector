@@ -14,4 +14,5 @@ export const qk = {
     ['cf', connectionId, 'apps', spaceGuid] as const,
   entries: ['entries'] as const,
   props: ['props'] as const,
+  filters: ['filters'] as const,
 };

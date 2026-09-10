@@ -28,6 +28,7 @@ import type {
   PropInfo,
   ValuesQuery,
 } from '../model/query';
+import type { SavedFilter, SavedFilterInput } from '../model/filters';
 
 export interface IpcError {
   code: string;
@@ -112,6 +113,12 @@ export interface IpcContracts {
   'entries:values': { req: ValuesQuery; res: string[] };
   /** Discovered top-level JSON keys with type/count/sample. */
   'props:list': { req: { sessionIds?: number[] }; res: PropInfo[] };
+
+  // ---- saved filters (M9) ----
+  'filters:list': { req: void; res: SavedFilter[] };
+  /** Create (no id) or update; an existing name is overwritten. */
+  'filters:save': { req: SavedFilterInput; res: SavedFilter };
+  'filters:delete': { req: { id: number }; res: void };
 }
 
 export const INVOKE_CHANNELS = [
@@ -152,6 +159,9 @@ export const INVOKE_CHANNELS = [
   'entries:get',
   'entries:values',
   'props:list',
+  'filters:list',
+  'filters:save',
+  'filters:delete',
 ] as const satisfies readonly (keyof IpcContracts)[];
 
 export interface PushEvents {
