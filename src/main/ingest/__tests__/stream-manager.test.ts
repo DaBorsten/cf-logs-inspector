@@ -263,6 +263,9 @@ describe('StreamManager', () => {
     await waitFor(() => batches.length === 1, 'recovery');
     expect(streams.get(s.id).status).toBe('running');
 
+    // Wait for the poller to be idle first: after the backfill it performs one immediate forward read,
+    // and revoking the tokens before that read would pause it without ever reaching the sleep we release.
+    await waitFor(() => gate.pending === 1, 'idle sleep after recovery');
     // Lose the session: CC rejects tokens and UAA rejects the refresh.
     cf.state.validAccessTokens.clear();
     cf.state.validRefreshTokens.clear();
