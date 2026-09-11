@@ -3,3 +3,6 @@ allowBuilds:
   electron: true
   electron-winstaller: true
   esbuild: true
+overrides:
+  # electron-builder's app-builder-lib requires this via CJS; @noble/hashes 2.x is ESM-only (ERR_REQUIRE_ESM).
+  '@noble/hashes': '1.7.1'
