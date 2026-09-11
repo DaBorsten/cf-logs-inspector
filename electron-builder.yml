@@ -7,6 +7,11 @@ files:
   - out/**
 asarUnpack:
   - '**/*.node'
+publish:
+  provider: github
+  owner: DevEpos
+  repo: cf-logs-inspector
+  releaseType: draft
 win:
   target: [nsis, zip]
 mac:
