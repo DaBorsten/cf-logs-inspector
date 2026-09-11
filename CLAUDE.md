@@ -2,7 +2,9 @@
 
 This file is the handover between development sessions (WSL and Windows checkouts). Keep it current when
 milestones finish or decisions change. The detailed plan is in `docs/DEVELOPMENT_PLAN.md`; read it before
-starting a new milestone.
+starting a new milestone. A VS Code extension track (shared core, separate front-end) is planned in
+`docs/DEVELOPMENT_PLAN_VSCODE.md`; not started, no bearing on the Electron milestones below until M13+ picks
+it up.
 
 ## What this is
 
@@ -59,6 +61,7 @@ one as the origin of history.
 ```
 CLAUDE.md                     this file
 docs/DEVELOPMENT_PLAN.md      approved architecture + milestones (source of truth for design)
+docs/DEVELOPMENT_PLAN_VSCODE.md  VS Code extension track: architecture mapping, reuse inventory, risks, M13-M19 (not started)
 package.json                  scripts: dev, build, preview, typecheck, test, lint, format, package
 electron.vite.config.ts       main/preload/renderer builds, alias @shared -> src/shared, @renderer -> src/renderer/src
 electron-builder.yml          nsis / dmg+zip / AppImage+deb, asarUnpack **/*.node
