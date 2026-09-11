@@ -441,7 +441,7 @@ export function LogTable(): React.JSX.Element {
                       aria-selected={selected}
                       data-focused={focused ? 'true' : undefined}
                       className={cn(
-                        'absolute left-0 grid w-full cursor-default items-center border-b border-border/60 text-[12px] hover:bg-accent/40',
+                        'absolute left-0 grid w-full cursor-default items-center border-b border-border/60 text-[12px] select-none hover:bg-accent/40',
                         rowTintClass(row.original.level),
                         selected && 'bg-primary/15 hover:bg-primary/20',
                         focused && 'outline outline-1 -outline-offset-1 outline-primary/60',
