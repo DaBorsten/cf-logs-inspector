@@ -8,10 +8,10 @@ files:
 asarUnpack:
   - '**/*.node'
 win:
-  target: [nsis]
+  target: [nsis, zip]
 mac:
   target: [dmg, zip]
   category: public.app-category.developer-tools
 linux:
-  target: [AppImage, deb]
+  target: [AppImage, zip]
   category: Development
