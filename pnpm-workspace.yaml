@@ -5,4 +5,5 @@ allowBuilds:
   esbuild: true
 overrides:
   # electron-builder's app-builder-lib requires this via CJS; @noble/hashes 2.x is ESM-only (ERR_REQUIRE_ESM).
-  '@noble/hashes': '1.7.1'
+  # Must be >=1.8.0 for the './blake2.js' subpath export app-builder-lib requires.
+  '@noble/hashes': '1.8.0'
