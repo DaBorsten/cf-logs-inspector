@@ -141,7 +141,7 @@ export function ConnectionForm({
 
   return (
     <form onSubmit={submit} className="flex min-h-0 flex-col gap-4" noValidate>
-      <div className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
+      <div className="flex min-h-0 flex-col gap-3 overflow-y-auto px-1">
         <Field id="cn-name" label="Name" error={errors.name}>
           <Input
             id="cn-name"
