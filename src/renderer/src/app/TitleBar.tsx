@@ -24,7 +24,7 @@ export function TitleBar(): React.JSX.Element {
       >
         <PanelLeft />
       </Button>
-      <span className="text-sm font-semibold tracking-tight">cf-log-inspector</span>
+      <span className="text-sm font-semibold tracking-tight">CF Log Inspector</span>
       <span className="mx-1 h-4 w-px bg-border" aria-hidden />
       <WorkspaceSwitcher />
       <div className="flex-1" />
