@@ -203,25 +203,25 @@ function AbsoluteForm({
       }}
     >
       <span className="font-medium">Absolute range</span>
+      <Field id="tf-abs-from" label="From" className="self-start">
+        <Input
+          id="tf-abs-from"
+          type="datetime-local"
+          step={1}
+          value={from}
+          onChange={(e) => setFrom(e.target.value)}
+          className="h-7 w-45 text-xs"
+        />
+      </Field>
       <div className="flex items-end gap-1">
-        <Field id="tf-abs-from" label="From" className="flex-1">
-          <Input
-            id="tf-abs-from"
-            type="datetime-local"
-            step={1}
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-            className="h-7 text-xs"
-          />
-        </Field>
-        <Field id="tf-abs-to" label="To" className="flex-1" error={error}>
+        <Field id="tf-abs-to" label="To" error={error} className="self-start">
           <Input
             id="tf-abs-to"
             type="datetime-local"
             step={1}
             value={to}
             onChange={(e) => setTo(e.target.value)}
-            className="h-7 text-xs"
+            className="h-7 w-45 text-xs"
             aria-invalid={Boolean(error)}
           />
         </Field>
