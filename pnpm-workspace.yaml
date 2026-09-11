@@ -1,8 +1,8 @@
-allowBuilds:
-  better-sqlite3: true
-  electron: true
-  electron-winstaller: true
-  esbuild: true
+onlyBuiltDependencies:
+  - better-sqlite3
+  - electron
+  - electron-winstaller
+  - esbuild
 overrides:
   # electron-builder's app-builder-lib requires this via CJS; @noble/hashes 2.x is ESM-only (ERR_REQUIRE_ESM).
   # Must be >=1.8.0 for the './blake2.js' subpath export app-builder-lib requires.
