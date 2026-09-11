@@ -64,30 +64,6 @@ function Node({
   return (
     <li role="treeitem" aria-expanded={container ? open : undefined}>
       <div className="group flex items-start gap-1 rounded px-1 hover:bg-accent/50">
-        {container ? (
-          <button
-            type="button"
-            className="mt-0.5 shrink-0 rounded text-muted-foreground hover:text-foreground"
-            onClick={() => setOpen((o) => !o)}
-            aria-label={open ? `Collapse ${keyLabel ?? 'root'}` : `Expand ${keyLabel ?? 'root'}`}
-          >
-            {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-          </button>
-        ) : (
-          <span className="w-3.5 shrink-0" />
-        )}
-        <span className="min-w-0 flex-1 break-all">
-          {keyLabel !== null ? <span className="text-primary">{keyLabel}</span> : null}
-          {keyLabel !== null ? <span className="text-muted-foreground">: </span> : null}
-          {container ? (
-            <span className="text-muted-foreground">
-              {Array.isArray(value) ? `[${entries.length}]` : `{${entries.length}}`}
-              {!open && entries.length > 0 ? ' …' : ''}
-            </span>
-          ) : (
-            <Scalar value={value} />
-          )}
-        </span>
         <span className="invisible flex shrink-0 items-center gap-0.5 group-hover:visible">
           {canFilter ? (
             <>
@@ -112,6 +88,30 @@ function Node({
               <Copy />
             </IconButton>
           ) : null}
+        </span>
+        {container ? (
+          <button
+            type="button"
+            className="mt-0.5 shrink-0 rounded text-muted-foreground hover:text-foreground"
+            onClick={() => setOpen((o) => !o)}
+            aria-label={open ? `Collapse ${keyLabel ?? 'root'}` : `Expand ${keyLabel ?? 'root'}`}
+          >
+            {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+          </button>
+        ) : (
+          <span className="w-3.5 shrink-0" />
+        )}
+        <span className="min-w-0 flex-1 break-all">
+          {keyLabel !== null ? <span className="text-primary">{keyLabel}</span> : null}
+          {keyLabel !== null ? <span className="text-muted-foreground">: </span> : null}
+          {container ? (
+            <span className="text-muted-foreground">
+              {Array.isArray(value) ? `[${entries.length}]` : `{${entries.length}}`}
+              {!open && entries.length > 0 ? ' …' : ''}
+            </span>
+          ) : (
+            <Scalar value={value} />
+          )}
         </span>
       </div>
       {container && open && entries.length > 0 ? (
