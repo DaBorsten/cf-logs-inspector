@@ -24,6 +24,8 @@ function createMainWindow(): BrowserWindow {
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
+    // electron-builder only applies resources/icon.* to packaged builds; set it explicitly so pnpm dev matches.
+    icon: join(__dirname, '../../resources/icon.png'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
