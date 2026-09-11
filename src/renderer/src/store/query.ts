@@ -39,7 +39,13 @@ export const useQueryStore = create<QueryState>()(
       toggleSort: (key) =>
         set((s) => {
           const current = s.sort[0];
-          if (current?.key !== key) return { sort: [{ key, dir: 'asc' }] };
+          // The default sort state is indistinguishable from an explicit desc on its own key,
+          // so treat it as "unsorted" and start the cycle at asc instead of resetting again.
+          const isDefaultState =
+            s.sort.length === DEFAULT_SORT.length &&
+            current?.key === DEFAULT_SORT[0]?.key &&
+            current?.dir === DEFAULT_SORT[0]?.dir;
+          if (current?.key !== key || isDefaultState) return { sort: [{ key, dir: 'asc' }] };
           if (current.dir === 'asc') return { sort: [{ key, dir: 'desc' }] };
           return { sort: [...DEFAULT_SORT] };
         }),
