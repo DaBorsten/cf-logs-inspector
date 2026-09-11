@@ -46,7 +46,8 @@ deliberately does not depend on the `cf` CLI.
 | M10 time filter + auto refresh + tail | done (2026-09-10): time range chip/panel (quick picks, custom relative, absolute in local/UTC, all time), auto refresh interval (off/1/2/5/10/30 s), tail mode with pause on scroll/hover/resize, refresh re-runs pages; 657 tests. |
 | M11 detail + interaction | done (2026-09-10): row selection (click/Ctrl/Shift, arrows/Page/Home/End, Ctrl+A, Escape), Ctrl+C copies NDJSON via entries:get, resizable detail panel (message/JSON tree/raw tabs, fields sidebar, copy buttons, filter for/out), query term highlighting, multi-line markers; 677 tests. |
 | M12 export + sessions | done (2026-09-10): streaming NDJSON/JSON/CSV export (`ExportJob`/`ExportManager`), `export:*` IPC + progress/done/failed push events, `ExportDialog` (format/scope/columns, progress, cancel, reveal), session scoping + "set time range to session" (`session:range`) with a query-bar scope chip, retention settings UI in the workspace dialog; 702 tests, typecheck/lint clean. |
-| M13+ | not started |
+| M13 packaging + CI | done (2026-09-11): electron-builder targets were already in place; added GitHub Actions CI (`ci.yml`: ubuntu-only lint/typecheck, then test+build matrix on ubuntu/windows/macos) and a tag-triggered release workflow (`release.yml`: `v*.*.*` tags build and `electron-builder --publish always` per OS into one draft GitHub Release), `packageManager` pin (`pnpm@10.6.5`) for corepack, `publish` block in `electron-builder.yml` (GitHub, draft). Unsigned builds; auto-update out of scope. Not yet exercised by pushing a real tag. |
+| M14+ | not started |
 
 `pnpm dev` was verified on Windows on 2026-09-10 (window shows the placeholder with the app version). The M2
 code has only been tested against the in-process mock (`test/fixtures/mock-cf.ts`); the first real-foundation
@@ -492,9 +493,30 @@ test/fixtures/tls/            self-signed localhost cert/key for TLS option test
 - Mock (`api/mock/mock-api.ts`) implements `export:run/cancel/reveal` and `session:range` with seedable
   `exportSavePath`/`cancelledExports` state and emits the same push events as main.
 
-## Next milestone: M13+
+## M13 packaging + CI: how it works (done)
 
-Not started; see `docs/DEVELOPMENT_PLAN.md` for later milestones (packaging/CI, real-foundation verification,
+- `.github/workflows/ci.yml`: `lint-typecheck` job (ubuntu-latest only) runs install/lint/typecheck once;
+  `test-build` job (matrix ubuntu/windows/macos, `needs: lint-typecheck`) runs install/test/build on all three
+  OS (native `better-sqlite3` rebuild differs per OS via `postinstall`). No packaging step in CI — packaging is
+  only exercised at release time to keep CI fast.
+- `.github/workflows/release.yml`: triggers on tags matching `v*.*.*`, `permissions: contents: write`, matrix
+  ubuntu/windows/macos: install, `pnpm build`, then `pnpm exec electron-builder --publish always` with
+  `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}`. Each OS publishes its artifacts into the same GitHub Release (draft,
+  per `releaseType: draft` in `electron-builder.yml`) for manual review before publishing.
+- `electron-builder.yml` gained a `publish` block (`provider: github`, `owner: DevEpos`,
+  `repo: cf-logs-inspector`, `releaseType: draft`); existing `win`/`mac`/`linux` target lists were untouched.
+- `package.json` gained `"packageManager": "pnpm@10.6.5"` so corepack pins the same pnpm version locally and
+  in CI; both workflows use `pnpm/action-setup` (no version input needed) + `actions/setup-node` with
+  `cache: pnpm`.
+- Actions are pinned to their latest majors (checked 2026-09-11): `actions/checkout@v7`,
+  `actions/setup-node@v7`, `pnpm/action-setup@v6`.
+- Out of scope for this pass: code signing (unsigned win/mac builds), auto-update.
+- Not yet verified: an actual tag push through `release.yml` to confirm the draft release and per-OS
+  artifacts appear as expected.
+
+## Next milestone: M14+
+
+Not started; see `docs/DEVELOPMENT_PLAN.md` for later milestones (real-foundation verification, auto-update,
 etc.) before picking the next scope of work.
 
 ## Platform notes
