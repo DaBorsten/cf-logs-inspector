@@ -329,7 +329,7 @@ export function LogTable(): React.JSX.Element {
         <div
           ref={scrollRef}
           data-virtual-scroll
-          className="min-h-0 flex-1 overflow-auto"
+          className="min-h-0 flex-1 overflow-auto outline-none"
           role="table"
           aria-rowcount={snapshot.total}
           aria-multiselectable
