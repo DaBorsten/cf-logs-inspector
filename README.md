@@ -2,6 +2,8 @@
 
 A cross-platform desktop app for streaming, storing, and searching Cloud Foundry application logs — no `cf` CLI required.
 
+![alt text](docs/img/app.png)
+
 ## Overview
 
 CF Log Inspector replaces `cf logs <app> [--recent]` in a terminal with a native desktop experience. It logs in to Cloud Foundry (including SAP BTP) spaces directly, streams logs from one or many apps at once via the Log Cache API, stores them in local SQLite workspaces so they survive a restart, and gives you a fast, filterable log table with a query language, time filtering, and export.
