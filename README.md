@@ -29,7 +29,15 @@ It is built with Electron and runs on Linux, Windows, and macOS.
 
 ## Installation
 
-CF Log Inspector is pre-1.0 and does not yet have published or signed release binaries. For now, you build it yourself from source and package it for your own platform.
+### Download a release
+
+Tagged releases (`vX.Y.Z`) are built for Windows, macOS, and Linux by a GitHub Actions workflow and published as a [GitHub Release](https://github.com/DevEpos/cf-log-inspector/releases). Download the installer for your platform from there.
+
+Builds are currently **unsigned** (no code signing, no auto-update yet), so your OS may warn about an unrecognized publisher on first launch.
+
+### Build from source
+
+Alternatively, build it yourself from source and package it for your own platform.
 
 ### Prerequisites
 
@@ -110,9 +118,14 @@ This also rebuilds `better-sqlite3` for Electron via the `postinstall` script.
 - ESLint for linting.
 - Tests are table-driven and colocated in `__tests__` folders next to the code they cover.
 
+### CI / releases
+
+- Every push and pull request runs lint, typecheck, and the test/build matrix (Ubuntu, Windows, macOS) via [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+- Pushing a tag matching `v*.*.*` triggers [`.github/workflows/release.yml`](.github/workflows/release.yml), which builds and publishes installers for all three platforms into a single draft GitHub Release for manual review before publishing.
+
 ### Project status
 
-CF Log Inspector is an actively developed, pre-1.0 project. Core functionality — streaming, local storage, the query engine, the main UI, and export/session management — is implemented. Later work, such as packaging/CI polish and verification against real Cloud Foundry foundations, is ongoing. See [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) for the authoritative, up-to-date architecture and milestone status.
+CF Log Inspector is an actively developed, pre-1.0 project. Core functionality — streaming, local storage, the query engine, the main UI, export/session management, and packaging/CI — is implemented. Verification against real Cloud Foundry foundations and code signing/auto-update are still outstanding. See [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) for the authoritative, up-to-date architecture and milestone status.
 
 ### Learn more / contributing
 
