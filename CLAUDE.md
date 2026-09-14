@@ -499,14 +499,15 @@ test/fixtures/tls/            self-signed localhost cert/key for TLS option test
   `test-build` job (matrix ubuntu/windows/macos, `needs: lint-typecheck`) runs install/test/build on all three
   OS (native `better-sqlite3` rebuild differs per OS via `postinstall`). No packaging step in CI — packaging is
   only exercised at release time to keep CI fast.
-- `.github/workflows/release.yml`: triggers on tags matching `v*.*.*`, `permissions: contents: write`. A
-  single `create-release` job first creates the draft release for the tag with `gh release create --draft`
-  (skipped if it already exists); the `package` matrix (ubuntu/windows/macos, `needs: create-release`) then
-  runs install, `pnpm build`, `pnpm exec electron-builder --publish always` with
-  `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}`, which finds the existing draft and only uploads assets. The
-  pre-create step exists because electron-builder's "find draft or create it" is not atomic: with three
-  parallel runners the first tag push (2026-09-14) produced two drafts for one tag. The pushed tag must equal
-  `v<package.json version>`, since electron-builder matches the release by that name.
+- `.github/workflows/release.yml` follows electron-builder's recommended GitHub Releases flow (rebuilt
+  2026-09-14): the user drafts a release in GitHub with tag `v<package.json version>` (e.g. `v0.2.0`), then
+  every push to `main` (or `workflow_dispatch`) rebuilds the installers on ubuntu/windows/macos and
+  `electron-builder --publish always` replaces the assets on that draft. Publishing the draft in GitHub tags
+  the latest commit. A `check-draft` job runs first and fails with a clear error when no draft for the
+  package version exists, because electron-builder's "find draft or create it" is not atomic and three
+  parallel runners raced into duplicate drafts on the first tag push. Consequence: bump `version` in
+  `package.json` and create the next draft before pushing work meant for a new release. Concurrency group
+  `release-<ref>` cancels superseded runs.
 - `electron-builder.yml` gained a `publish` block (`provider: github`, `owner: DevEpos`,
   `repo: cf-logs-inspector`, `releaseType: draft`); existing `win`/`mac`/`linux` target lists were untouched.
 - `package.json` gained `"packageManager": "pnpm@10.6.5"` so corepack pins the same pnpm version locally and
@@ -515,8 +516,8 @@ test/fixtures/tls/            self-signed localhost cert/key for TLS option test
 - Actions are pinned to their latest majors (checked 2026-09-11): `actions/checkout@v7`,
   `actions/setup-node@v7`, `pnpm/action-setup@v6`.
 - Out of scope for this pass: code signing (unsigned win/mac builds), auto-update.
-- Verified 2026-09-14: a tag push runs `release.yml` and per-OS artifacts land in a draft release. The
-  duplicate-draft race described above was fixed afterwards; the next tag push should show exactly one draft.
+- Verified 2026-09-14: per-OS artifacts land in a draft release via `release.yml`. The rebuilt
+  draft-first workflow has not yet been exercised end to end (draft `v0.2.0` must exist, then push to main).
 
 ## Next milestone: M14+
 

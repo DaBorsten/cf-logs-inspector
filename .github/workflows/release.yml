@@ -1,33 +1,45 @@
 name: Release
 
+# electron-builder's recommended GitHub Releases workflow:
+# 1. Draft a release in GitHub whose tag is "v<package.json version>" (e.g. v0.2.0). The title is free.
+# 2. Every push to main rebuilds the installers and replaces the assets on that draft.
+# 3. When the draft is ready, publish it in GitHub; GitHub then tags the latest commit.
+# The draft must exist before this runs: if it does not, three parallel electron-builder runners
+# would each try to create it and the non-atomic "find or create" races into duplicate drafts.
+
 on:
   push:
-    tags:
-      - 'v*.*.*'
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
 
 jobs:
-  # Create the draft release once, before the OS matrix runs. electron-builder's GitHub publisher
-  # does a non-atomic "find draft or create it"; with three parallel runners this raced and produced
-  # two drafts for one tag. With the draft already present, each runner only uploads its assets.
-  create-release:
+  check-draft:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
-      - name: Create draft release if missing
+      - id: tag
+        run: echo "tag=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Require an existing draft release for the package version
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "Release $GITHUB_REF_NAME already exists"
-          else
-            gh release create "$GITHUB_REF_NAME" --draft --title "$GITHUB_REF_NAME" --notes ""
+          if ! gh release view "$TAG" --json isDraft --jq '.isDraft' | grep -qx true; then
+            echo "::error::No draft release with tag $TAG found. Create it in GitHub Releases first."
+            exit 1
           fi
 
   package:
-    needs: create-release
+    needs: check-draft
     strategy:
       fail-fast: false
       matrix:
