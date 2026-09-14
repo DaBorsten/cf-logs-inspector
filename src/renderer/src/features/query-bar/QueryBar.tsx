@@ -13,6 +13,7 @@ import { useSessions } from '../../queries/sessions';
 import { useQueryStore } from '../../store/query';
 import { useProps } from '../log-table/useEntries';
 import { TimeFilterControl } from '../time-filter/TimeFilterControl';
+import { DqlHelpDialog } from './DqlHelpDialog';
 import { dqlDiagnostics, type CompletionDeps } from './dql-language';
 import { QueryEditor } from './QueryEditor';
 
@@ -73,36 +74,39 @@ export function QueryBar(): React.JSX.Element {
   return (
     <div className="relative shrink-0 border-b bg-card">
       <div className="flex items-center gap-1 px-2 py-1">
-        <div
-          className={cn(
-            'flex min-w-0 flex-1 items-center rounded-md border border-input bg-background px-2 focus-within:ring-2 focus-within:ring-ring',
-            diagnostic && 'border-destructive/60',
-          )}
-        >
-          <QueryEditor
-            value={draft}
-            onChange={setDraft}
-            onSubmit={() => apply(draft)}
-            onCancel={() => {
-              setDraft(committed);
-              setPanel(null);
-            }}
-            completion={completion}
-            placeholder="Filter with DQL, e.g. level:ERROR and not app:worker   (Enter applies, Ctrl+Space completes)"
-          />
-          {draft ? (
-            <button
-              type="button"
-              className="rounded p-0.5 text-muted-foreground hover:text-foreground"
-              aria-label="Clear query"
-              onClick={() => {
-                setDraft('');
-                setDql('');
+        <div className="flex min-w-0 flex-1 items-stretch">
+          <div
+            className={cn(
+              'flex min-w-0 flex-1 items-center rounded-l-md border border-r-0 border-input bg-background px-2 focus-within:ring-2 focus-within:ring-ring',
+              diagnostic && 'border-destructive/60',
+            )}
+          >
+            <QueryEditor
+              value={draft}
+              onChange={setDraft}
+              onSubmit={() => apply(draft)}
+              onCancel={() => {
+                setDraft(committed);
+                setPanel(null);
               }}
-            >
-              <X className="size-3.5" />
-            </button>
-          ) : null}
+              completion={completion}
+              placeholder="Filter with DQL, e.g. level:ERROR and not app:worker   (Enter applies, Ctrl+Space completes)"
+            />
+            {draft ? (
+              <button
+                type="button"
+                className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                aria-label="Clear query"
+                onClick={() => {
+                  setDraft('');
+                  setDql('');
+                }}
+              >
+                <X className="size-3.5" />
+              </button>
+            ) : null}
+          </div>
+          <DqlHelpDialog className="h-auto rounded-l-none" />
         </div>
         <Button
           size="sm"
