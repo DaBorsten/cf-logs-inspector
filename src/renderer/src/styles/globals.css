@@ -106,4 +106,7 @@
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-muted-foreground/50;
   }
+  ::-webkit-scrollbar-corner {
+    @apply bg-background;
+  }
 }
