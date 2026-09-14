@@ -499,10 +499,14 @@ test/fixtures/tls/            self-signed localhost cert/key for TLS option test
   `test-build` job (matrix ubuntu/windows/macos, `needs: lint-typecheck`) runs install/test/build on all three
   OS (native `better-sqlite3` rebuild differs per OS via `postinstall`). No packaging step in CI — packaging is
   only exercised at release time to keep CI fast.
-- `.github/workflows/release.yml`: triggers on tags matching `v*.*.*`, `permissions: contents: write`, matrix
-  ubuntu/windows/macos: install, `pnpm build`, then `pnpm exec electron-builder --publish always` with
-  `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}`. Each OS publishes its artifacts into the same GitHub Release (draft,
-  per `releaseType: draft` in `electron-builder.yml`) for manual review before publishing.
+- `.github/workflows/release.yml`: triggers on tags matching `v*.*.*`, `permissions: contents: write`. A
+  single `create-release` job first creates the draft release for the tag with `gh release create --draft`
+  (skipped if it already exists); the `package` matrix (ubuntu/windows/macos, `needs: create-release`) then
+  runs install, `pnpm build`, `pnpm exec electron-builder --publish always` with
+  `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}`, which finds the existing draft and only uploads assets. The
+  pre-create step exists because electron-builder's "find draft or create it" is not atomic: with three
+  parallel runners the first tag push (2026-09-14) produced two drafts for one tag. The pushed tag must equal
+  `v<package.json version>`, since electron-builder matches the release by that name.
 - `electron-builder.yml` gained a `publish` block (`provider: github`, `owner: DevEpos`,
   `repo: cf-logs-inspector`, `releaseType: draft`); existing `win`/`mac`/`linux` target lists were untouched.
 - `package.json` gained `"packageManager": "pnpm@10.6.5"` so corepack pins the same pnpm version locally and
@@ -511,8 +515,8 @@ test/fixtures/tls/            self-signed localhost cert/key for TLS option test
 - Actions are pinned to their latest majors (checked 2026-09-11): `actions/checkout@v7`,
   `actions/setup-node@v7`, `pnpm/action-setup@v6`.
 - Out of scope for this pass: code signing (unsigned win/mac builds), auto-update.
-- Not yet verified: an actual tag push through `release.yml` to confirm the draft release and per-OS
-  artifacts appear as expected.
+- Verified 2026-09-14: a tag push runs `release.yml` and per-OS artifacts land in a draft release. The
+  duplicate-draft race described above was fixed afterwards; the next tag push should show exactly one draft.
 
 ## Next milestone: M14+
 

@@ -9,7 +9,25 @@ permissions:
   contents: write
 
 jobs:
+  # Create the draft release once, before the OS matrix runs. electron-builder's GitHub publisher
+  # does a non-atomic "find draft or create it"; with three parallel runners this raced and produced
+  # two drafts for one tag. With the draft already present, each runner only uploads its assets.
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Create draft release if missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists"
+          else
+            gh release create "$GITHUB_REF_NAME" --draft --title "$GITHUB_REF_NAME" --notes ""
+          fi
+
   package:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
