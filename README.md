@@ -31,7 +31,7 @@ It is built with Electron and runs on Linux, Windows, and macOS.
 
 ### Download a release
 
-Tagged releases (`vX.Y.Z`) are built for Windows, macOS, and Linux by a GitHub Actions workflow and published as a [GitHub Release](https://github.com/DevEpos/cf-log-inspector/releases). Download the installer for your platform from there.
+Tagged releases (`vX.Y.Z`) are built for Windows, macOS, and Linux by a GitHub Actions workflow and published as a [GitHub Release](https://github.com/DevEpos/cf-logs-inspector/releases). Download the installer for your platform from there.
 
 Builds are currently **unsigned** (no code signing, no auto-update yet), so your OS may warn about an unrecognized publisher on first launch.
 
