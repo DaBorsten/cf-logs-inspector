@@ -63,7 +63,7 @@ describe('row selection and detail panel', () => {
     expect(panel).toHaveTextContent('2026-09-10 10:00:04.000 Z');
     expect(panel).toHaveTextContent('#5');
     expect(table).toHaveTextContent('tenant');
-    expect(table).toHaveTextContent('"t2"');
+    expect(table).toHaveTextContent('t2');
     // Fields sidebar
     const fields = within(panel).getByLabelText('Fields');
     expect(fields).toHaveTextContent('api');

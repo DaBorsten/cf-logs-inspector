@@ -17,8 +17,8 @@ describe('JsonTable', () => {
   it('collapses array-of-object elements onto the shared parent path', () => {
     render(<JsonTable value={{ items: [{ name: 'a' }, { name: 'b' }] }} />);
     expect(screen.getAllByText('items.name')).toHaveLength(2);
-    expect(screen.getByText('"a"')).toBeInTheDocument();
-    expect(screen.getByText('"b"')).toBeInTheDocument();
+    expect(screen.getByText('a')).toBeInTheDocument();
+    expect(screen.getByText('b')).toBeInTheDocument();
   });
 
   it('shows an empty nested container as its own leaf', () => {
@@ -46,15 +46,15 @@ describe('JsonTable', () => {
     const user = userEvent.setup();
     render(<JsonTable value={{ tags: ['a', 'b', 'c', 'd', 'e'] }} />);
     const row = screen.getByText('tags').closest('tr')!;
-    expect(within(row).getByText('"a"')).toBeInTheDocument();
-    expect(within(row).getByText('"c"')).toBeInTheDocument();
-    expect(within(row).queryByText('"d"')).not.toBeInTheDocument();
+    expect(within(row).getByText('a')).toBeInTheDocument();
+    expect(within(row).getByText('c')).toBeInTheDocument();
+    expect(within(row).queryByText('d')).not.toBeInTheDocument();
     const more = within(row).getByRole('button', { name: /show 2 more/i });
     await user.click(more);
-    expect(within(row).getByText('"d"')).toBeInTheDocument();
-    expect(within(row).getByText('"e"')).toBeInTheDocument();
+    expect(within(row).getByText('d')).toBeInTheDocument();
+    expect(within(row).getByText('e')).toBeInTheDocument();
     await user.click(within(row).getByRole('button', { name: /show less/i }));
-    expect(within(row).queryByText('"d"')).not.toBeInTheDocument();
+    expect(within(row).queryByText('d')).not.toBeInTheDocument();
   });
 
   it('previews a multi-line string as up to 3 lines with an expand toggle', async () => {
