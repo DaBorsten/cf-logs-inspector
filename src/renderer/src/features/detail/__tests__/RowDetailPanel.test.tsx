@@ -80,6 +80,12 @@ describe('row selection and detail panel', () => {
     // The explicit toggle is the only way back in, and shows the currently focused row.
     await user.click(screen.getByRole('button', { name: /show details/i }));
     expect(await screen.findByRole('region', { name: /entry details/i })).toHaveTextContent('#4');
+
+    // Double-clicking a row is also an explicit reopen trigger.
+    await user.click(screen.getByRole('button', { name: /hide details/i }));
+    expect(screen.queryByRole('region', { name: /entry details/i })).not.toBeInTheDocument();
+    await user.dblClick(rowFor(6));
+    expect(await screen.findByRole('region', { name: /entry details/i })).toHaveTextContent('#6');
   });
 
   it('shows multi-line messages fully in the table row and detail panel', async () => {

@@ -540,6 +540,7 @@ export function LogTable(): React.JSX.Element {
                           }),
                         )
                       }
+                      onDoubleClick={() => setDetailOpen(true)}
                     >
                       {row.getVisibleCells().map((cell) => {
                         const multiline =
