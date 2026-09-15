@@ -5,6 +5,7 @@ import { makeMockEntries, propsOf } from '../../../api/mock/entries';
 import { renderWithProviders, setupMock } from '../../../test/render';
 import { useQueryStore } from '../../../store/query';
 import { useSelectionStore } from '../../../store/selection';
+import { useUiStore } from '../../../store/ui';
 import { EMPTY_SELECTION } from '../../log-table/selection';
 import { LogView } from '../../log-table/LogView';
 
@@ -28,7 +29,11 @@ beforeEach(() => {
     tail: false,
     refreshIntervalMs: 0,
   });
-  useSelectionStore.setState({ selection: EMPTY_SELECTION, detailOpen: false });
+  useSelectionStore.setState({
+    selection: EMPTY_SELECTION,
+    detailOpen: false,
+    detailAutoOpenDisabled: false,
+  });
   clipboard = { writeText: vi.fn(() => Promise.resolve()) };
   Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true });
 });
@@ -54,34 +59,46 @@ describe('row selection and detail panel', () => {
     await user.click(rowFor(5));
     const panel = await screen.findByRole('region', { name: /entry details/i });
     expect(rowFor(5)).toHaveAttribute('aria-selected', 'true');
-    const tree = await within(panel).findByRole('tree');
+    const table = await within(panel).findByRole('table');
     expect(panel).toHaveTextContent('2026-09-10 10:00:04.000 Z');
     expect(panel).toHaveTextContent('#5');
-    expect(tree).toHaveTextContent('tenant');
-    expect(tree).toHaveTextContent('"t2"');
+    expect(table).toHaveTextContent('tenant');
+    expect(table).toHaveTextContent('t2');
     // Fields sidebar
     const fields = within(panel).getByLabelText('Fields');
     expect(fields).toHaveTextContent('api');
     expect(fields).toHaveTextContent('JSON payload');
 
-    await user.click(within(panel).getByRole('tab', { name: 'raw' }));
+    await user.click(within(panel).getByRole('tab', { name: 'Raw' }));
     expect(within(panel).getByRole('tabpanel')).toHaveTextContent('"msg":"request 5 handled"');
 
     await user.click(within(panel).getByRole('button', { name: /close details/i }));
     expect(screen.queryByRole('region', { name: /entry details/i })).not.toBeInTheDocument();
-    // Re-selecting reopens it.
+    // Selecting other rows must not reopen a manually closed panel.
     await user.click(rowFor(4));
+    expect(screen.queryByRole('region', { name: /entry details/i })).not.toBeInTheDocument();
+    // The explicit toggle is the only way back in, and shows the currently focused row.
+    await user.click(screen.getByRole('button', { name: /show details/i }));
     expect(await screen.findByRole('region', { name: /entry details/i })).toHaveTextContent('#4');
+
+    // Double-clicking a row is also an explicit reopen trigger.
+    await user.click(screen.getByRole('button', { name: /hide details/i }));
+    expect(screen.queryByRole('region', { name: /entry details/i })).not.toBeInTheDocument();
+    await user.dblClick(rowFor(6));
+    expect(await screen.findByRole('region', { name: /entry details/i })).toHaveTextContent('#6');
   });
 
-  it('marks multi-line messages and shows them fully in the detail panel', async () => {
+  it('shows multi-line messages fully in the table row and detail panel', async () => {
     seed();
     const user = userEvent.setup();
     renderWithProviders(<LogView />);
     await waitFor(() => expect(dataRows()).toHaveLength(6));
     expect(rowFor(3)).toHaveTextContent('first line');
-    expect(rowFor(3)).toHaveTextContent('⏎ 3');
-    expect(rowFor(3)).not.toHaveTextContent('second line');
+    expect(rowFor(3)).toHaveTextContent('second line');
+    expect(rowFor(3)).toHaveTextContent('third line');
+    expect(
+      within(rowFor(3)).queryByRole('button', { name: /show \d+ more/i }),
+    ).not.toBeInTheDocument();
     await user.click(rowFor(3));
     const panel = await screen.findByRole('region', { name: /entry details/i });
     expect(within(panel).getByRole('tabpanel')).toHaveTextContent('second line');
@@ -156,5 +173,110 @@ describe('row selection and detail panel', () => {
     const panel = await screen.findByRole('region', { name: /entry details/i });
     await user.click(await within(panel).findByRole('button', { name: /^raw$/i }));
     await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith('plain line 6'));
+  });
+
+  it('opens on the message tab when json is preferred but the entry has no parsed JSON', async () => {
+    seed();
+    const user = userEvent.setup();
+    renderWithProviders(<LogView />);
+    await waitFor(() => expect(dataRows()).toHaveLength(6));
+    // id 6 is plain text in the fixture; default preference is 'table'.
+    await user.click(rowFor(6));
+    const panel = await screen.findByRole('region', { name: /entry details/i });
+    expect(within(panel).getByRole('tab', { name: 'Message' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('makes the clicked tab the sticky default for later rows, with a display-only fallback', async () => {
+    seed();
+    act(() => useUiStore.getState().setDefaultDetailTab('raw'));
+    const user = userEvent.setup();
+    renderWithProviders(<LogView />);
+    await waitFor(() => expect(dataRows()).toHaveLength(6));
+
+    // id 5 is JSON; opens on the seeded 'raw' preference.
+    await user.click(rowFor(5));
+    let panel = await screen.findByRole('region', { name: /entry details/i });
+    const detailTabs = () => within(panel).getByRole('tablist', { name: 'Detail view' });
+    expect(within(detailTabs()).getByRole('tab', { name: 'Raw' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+
+    // Clicking JSON persists it as the new preference (no Settings dialog involved).
+    await user.click(within(detailTabs()).getByRole('tab', { name: 'JSON' }));
+    expect(useUiStore.getState().defaultDetailTab).toBe('json');
+    expect(within(detailTabs()).getByRole('tab', { name: 'JSON' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+
+    // id 4 is also JSON; it now opens on the newly-clicked JSON tab, not the original 'raw' seed.
+    await user.click(rowFor(4));
+    panel = await screen.findByRole('region', { name: /entry details/i });
+    expect(within(detailTabs()).getByRole('tab', { name: 'JSON' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+
+    // id 6 is plain text: falls back to Message for display only, the preference stays 'json'.
+    await user.click(rowFor(6));
+    panel = await screen.findByRole('region', { name: /entry details/i });
+    expect(within(detailTabs()).getByRole('tab', { name: 'Message' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(useUiStore.getState().defaultDetailTab).toBe('json');
+
+    // id 5 (JSON) again: jumps back to JSON, proving the fallback never overwrote the preference.
+    await user.click(rowFor(5));
+    panel = await screen.findByRole('region', { name: /entry details/i });
+    expect(within(detailTabs()).getByRole('tab', { name: 'JSON' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('shows the flattened JSON table by default, with per-row filter and copy actions', async () => {
+    seed();
+    const user = userEvent.setup();
+    renderWithProviders(<LogView />);
+    await waitFor(() => expect(dataRows()).toHaveLength(6));
+    await user.click(rowFor(5));
+    const panel = await screen.findByRole('region', { name: /entry details/i });
+    const table = await within(panel).findByRole('table');
+    expect(table).toHaveTextContent('tenant');
+    expect(within(table).getByRole('button', { name: 'Filter for tenant' })).toBeInTheDocument();
+    expect(within(panel).getByRole('tab', { name: 'Table' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('shows a plain, read-only JSON view on its own tab, separate from Table', async () => {
+    seed();
+    const user = userEvent.setup();
+    renderWithProviders(<LogView />);
+    await waitFor(() => expect(dataRows()).toHaveLength(6));
+    await user.click(rowFor(5));
+    const panel = await screen.findByRole('region', { name: /entry details/i });
+    await within(panel).findByRole('table');
+    const detailTabs = within(panel).getByRole('tablist', { name: 'Detail view' });
+
+    await user.click(within(detailTabs).getByRole('tab', { name: 'JSON' }));
+    expect(useUiStore.getState().defaultDetailTab).toBe('json');
+    expect(within(panel).queryByRole('table')).not.toBeInTheDocument();
+    expect(
+      within(panel).queryByRole('button', { name: 'Filter for tenant' }),
+    ).not.toBeInTheDocument();
+    expect(within(panel).getByRole('tabpanel')).toHaveTextContent('"tenant": "t2"');
+
+    // Table remains a separate tab with the flattened, filterable view.
+    await user.click(within(detailTabs).getByRole('tab', { name: 'Table' }));
+    expect(useUiStore.getState().defaultDetailTab).toBe('table');
+    expect(within(panel).getByRole('table')).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Filter for tenant' })).toBeInTheDocument();
   });
 });

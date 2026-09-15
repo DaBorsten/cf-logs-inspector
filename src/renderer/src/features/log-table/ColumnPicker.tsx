@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ArrowDown, ArrowUp, Columns3, RotateCcw } from 'lucide-react';
+import { ArrowDown, ArrowUp, Columns3, GripVertical, RotateCcw } from 'lucide-react';
 import type { PropInfo } from '@shared/model/query';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -22,6 +22,8 @@ export interface ColumnPickerProps {
 export function ColumnPicker({ layout, props, onChange }: ColumnPickerProps): React.JSX.Element {
   const [open, setOpen] = React.useState(false);
   const [filter, setFilter] = React.useState('');
+  const [dragId, setDragId] = React.useState<string | null>(null);
+  const [dragOverId, setDragOverId] = React.useState<string | null>(null);
   const ref = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -49,6 +51,42 @@ export function ColumnPicker({ layout, props, onChange }: ColumnPickerProps): Re
       [order[idx], order[target]] = [order[target]!, order[idx]!];
       return { ...prev, order };
     });
+  const moveBefore = (id: string, targetId: string): void =>
+    onChange((prev) => {
+      if (id === targetId) return prev;
+      const from = prev.order.indexOf(id);
+      const to = prev.order.indexOf(targetId);
+      if (from < 0 || to < 0) return prev;
+      const order = [...prev.order];
+      order.splice(from, 1);
+      order.splice(from < to ? to - 1 : to, 0, id);
+      return { ...prev, order };
+    });
+
+  const endDrag = (): void => {
+    setDragId(null);
+    setDragOverId(null);
+  };
+  const dragHandlers = (id: string): React.HTMLAttributes<HTMLLIElement> => ({
+    draggable: true,
+    onDragStart: (e) => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', id);
+      setDragId(id);
+    },
+    onDragOver: (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (dragId && dragId !== id) setDragOverId(id);
+    },
+    onDrop: (e) => {
+      e.preventDefault();
+      const draggedId = e.dataTransfer.getData('text/plain') || dragId;
+      if (draggedId) moveBefore(draggedId, id);
+      endDrag();
+    },
+    onDragEnd: endDrag,
+  });
 
   const q = filter.trim().toLowerCase();
   const available = [
@@ -93,8 +131,17 @@ export function ColumnPicker({ layout, props, onChange }: ColumnPickerProps): Re
             {layout.order.map((id, i) => (
               <li
                 key={id}
-                className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-accent/60"
+                {...dragHandlers(id)}
+                className={cn(
+                  'flex items-center gap-1 rounded px-1 py-0.5 hover:bg-accent/60',
+                  dragId === id && 'opacity-40',
+                  dragOverId === id && dragId !== id && 'border-t-2 border-primary',
+                )}
               >
+                <GripVertical
+                  className="size-3.5 shrink-0 cursor-grab text-muted-foreground"
+                  aria-hidden="true"
+                />
                 <label className="flex min-w-0 flex-1 items-center gap-2">
                   <input
                     type="checkbox"

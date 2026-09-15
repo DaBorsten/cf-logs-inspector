@@ -13,6 +13,7 @@ import {
   ArrowUpDown,
   Download,
   Globe,
+  PanelBottom,
   Pause,
   Radio,
   RefreshCw,
@@ -30,8 +31,16 @@ import { useSelectionStore } from '../../store/selection';
 import { copyText } from '../detail/RowDetailPanel';
 import { ExportDialog } from '../export/ExportDialog';
 import { ColumnPicker } from './ColumnPicker';
-import { buildColumns, DEFAULT_PROP_SIZE, FIXED_COLUMNS, rowTintClass, sortKeyOf } from './columns';
+import {
+  buildColumns,
+  DEFAULT_PROP_SIZE,
+  FIXED_COLUMNS,
+  isMultilineColumn,
+  rowTintClass,
+  sortKeyOf,
+} from './columns';
 import { buildHighlightTerms } from './highlight';
+import { cellHeight, ROW_HEIGHT, valueLines } from './multiline';
 import { moveSelection, selectByClick, type SelectionMove } from './selection';
 import './table-meta';
 import { useColumnLayout } from './useColumnLayout';
@@ -47,7 +56,7 @@ const KEY_MOVES: Record<string, SelectionMove> = {
 };
 const COPY_LIMIT = 500;
 
-export const ROW_HEIGHT = 28;
+export { ROW_HEIGHT };
 
 export function LogTable(): React.JSX.Element {
   const dql = useQueryStore((s) => s.dql);
@@ -64,7 +73,24 @@ export function LogTable(): React.JSX.Element {
   const selection = useSelectionStore((s) => s.selection);
   const setSelection = useSelectionStore((s) => s.setSelection);
   const clearSelection = useSelectionStore((s) => s.clear);
+  const detailOpen = useSelectionStore((s) => s.detailOpen);
+  const setDetailOpen = useSelectionStore((s) => s.setDetailOpen);
   const highlightTerms = React.useMemo(() => buildHighlightTerms(dql), [dql]);
+
+  const [expandedCells, setExpandedCells] = React.useState<Set<string>>(() => new Set());
+  const isExpanded = React.useCallback(
+    (rowId: string, columnId: string) => expandedCells.has(`${rowId}:${columnId}`),
+    [expandedCells],
+  );
+  const toggleExpanded = React.useCallback((rowId: string, columnId: string) => {
+    setExpandedCells((prev) => {
+      const key = `${rowId}:${columnId}`;
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   const scope = React.useMemo<EntryScope>(() => {
     const s: EntryScope = { sort };
@@ -113,18 +139,54 @@ export function LogTable(): React.JSX.Element {
       })),
     getCoreRowModel: getCoreRowModel(),
     getRowId: (r) => String(r.id),
-    meta: { highlightTerms },
+    meta: { highlightTerms, isExpanded, toggleExpanded },
   });
 
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const rows = table.getRowModel().rows;
+
+  const multilineColumnIds = React.useMemo(
+    () => columns.map((c) => c.id!).filter((id) => columnVisibility[id] && isMultilineColumn(id)),
+    [columns, columnVisibility],
+  );
+  // Only columns that CAN hold multi-line values are candidates; whether a given row's value in
+  // that column actually has newlines (vs. just being a long single line) is checked per cell, so
+  // ordinary single-line values keep their normal single-line ellipsis truncation.
+  const cellLines = React.useCallback((row: (typeof rows)[number], colId: string) => {
+    const raw = colId === 'message' ? row.original.message : row.original.props?.[sortKeyOf(colId)];
+    return typeof raw === 'string' ? valueLines(raw) : null;
+  }, []);
+  const rowHeights = React.useMemo(
+    () =>
+      rows.map((row) => {
+        let max = ROW_HEIGHT;
+        for (const colId of multilineColumnIds) {
+          const lines = cellLines(row, colId);
+          if (!lines) continue;
+          max = Math.max(max, cellHeight(lines.length, isExpanded(row.id, colId)));
+        }
+        return max;
+      }),
+    [rows, multilineColumnIds, cellLines, isExpanded],
+  );
+  const estimateSize = React.useCallback(
+    (index: number) => rowHeights[index] ?? ROW_HEIGHT,
+    [rowHeights],
+  );
   const virtualizer = useVirtualizer({
     count: rows.length + (pages.hasNextPage ? 1 : 0),
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize,
+    // Row measurement/resize can happen synchronously from a click handler (expand toggle) that
+    // is already inside a React update; flushSync there would try to render while React is still
+    // rendering. A plain (batched) rerender is fine since our resizes aren't scroll-critical.
+    useFlushSync: false,
     overscan: 15,
     initialRect: { width: 1200, height: 600 },
   });
+  React.useEffect(() => {
+    rowHeights.forEach((h, i) => virtualizer.resizeItem(i, h));
+  }, [rowHeights, virtualizer]);
   const items = virtualizer.getVirtualItems();
 
   // Load the next page when the placeholder row scrolls into view.
@@ -292,6 +354,17 @@ export function LogTable(): React.JSX.Element {
         >
           <Globe /> {tz === 'local' ? 'Local' : 'UTC'}
         </Button>
+        <Button
+          size="sm"
+          variant={detailOpen ? 'secondary' : 'ghost'}
+          onClick={() => setDetailOpen(!detailOpen)}
+          disabled={selection.focus === null}
+          aria-pressed={detailOpen}
+          aria-label={detailOpen ? 'Hide details' : 'Show details'}
+          title={detailOpen ? 'Hide details' : 'Show details'}
+        >
+          <PanelBottom /> Details
+        </Button>
         <ColumnPicker layout={layout} props={propInfos ?? []} onChange={setLayout} />
         <Button
           size="sm"
@@ -433,22 +506,30 @@ export function LogTable(): React.JSX.Element {
                   const id = row.original.id;
                   const selected = selectedSet.has(id);
                   const focused = selection.focus === id;
+                  const tall = item.size > ROW_HEIGHT;
                   return (
                     <div
                       key={row.id}
+                      ref={virtualizer.measureElement}
+                      data-index={item.index}
                       role="row"
                       data-entry-id={id}
                       aria-selected={selected}
                       data-focused={focused ? 'true' : undefined}
                       className={cn(
-                        'absolute left-0 grid w-full cursor-default items-center border-b border-border/60 text-[12px] select-none hover:bg-accent/40',
+                        'absolute left-0 grid w-full cursor-default border-b border-border/60 text-[12px] select-none hover:bg-accent/40',
+                        tall ? 'items-start' : 'items-center',
                         rowTintClass(row.original.level),
                         selected && 'bg-primary/15 hover:bg-primary/20',
                         focused && 'outline outline-1 -outline-offset-1 outline-primary/60',
                       )}
                       style={{
                         transform: `translateY(${item.start}px)`,
-                        height: ROW_HEIGHT,
+                        // A floor, not a fixed height: real content (e.g. a long line whose
+                        // rendered height doesn't exactly match our line-count estimate) is free
+                        // to push the row taller. `measureElement` feeds the true rendered size
+                        // back into the virtualizer so later rows are repositioned to match.
+                        minHeight: item.size,
                         gridTemplateColumns: gridTemplate,
                       }}
                       onClick={(e) =>
@@ -459,12 +540,22 @@ export function LogTable(): React.JSX.Element {
                           }),
                         )
                       }
+                      onDoubleClick={() => setDetailOpen(true)}
                     >
-                      {row.getVisibleCells().map((cell) => (
-                        <div key={cell.id} role="cell" className="truncate px-2">
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </div>
-                      ))}
+                      {row.getVisibleCells().map((cell) => {
+                        const multiline =
+                          isMultilineColumn(cell.column.id) &&
+                          cellLines(row, cell.column.id) !== null;
+                        return (
+                          <div
+                            key={cell.id}
+                            role="cell"
+                            className={cn('px-2', tall && 'py-1.5', !multiline && 'truncate')}
+                          >
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })}

@@ -12,14 +12,14 @@ Goal: one cross-platform desktop app (Linux/Windows/macOS) that logs in to CF sp
 
 ## Decisions (confirmed with user)
 
-| Topic | Decision |
-|---|---|
-| Shell | Electron + TypeScript (electron-vite, electron-builder), pnpm, Node 22 |
-| CF access | Direct HTTP: UAA `/oauth/token`, CF v3 API, Log Cache `/api/v1/read/<guid>` (no cf CLI dependency) |
-| UI | React 19 + TanStack Table v8 + TanStack Virtual; Tailwind 4 + shadcn/ui (Radix); CodeMirror 6 for the query bar |
-| Persistence | Multiple named SQLite workspace files (better-sqlite3, WAL); one open at a time |
-| Credentials | Refresh tokens encrypted with Electron `safeStorage`; passwords never stored |
-| Query language | DQL subset (OpenSearch Dashboards Query Language) parsed in shared code, compiled to SQL in main |
+| Topic          | Decision                                                                                                        |
+| -------------- | --------------------------------------------------------------------------------------------------------------- |
+| Shell          | Electron + TypeScript (electron-vite, electron-builder), pnpm, Node 22                                          |
+| CF access      | Direct HTTP: UAA `/oauth/token`, CF v3 API, Log Cache `/api/v1/read/<guid>` (no cf CLI dependency)              |
+| UI             | React 19 + TanStack Table v8 + TanStack Virtual; Tailwind 4 + shadcn/ui (Radix); CodeMirror 6 for the query bar |
+| Persistence    | Multiple named SQLite workspace files (better-sqlite3, WAL); one open at a time                                 |
+| Credentials    | Refresh tokens encrypted with Electron `safeStorage`; passwords never stored                                    |
+| Query language | DQL subset (OpenSearch Dashboards Query Language) parsed in shared code, compiled to SQL in main                |
 
 Assumptions made (flag if wrong): adjacent DQL clauses without operator combine with **and** (DQL itself defaults to or; `and` is what log filtering users expect, exposed as a constant). Only top-level JSON payload keys become dynamic properties; nested values remain queryable via dotted paths.
 
@@ -32,15 +32,15 @@ Assumptions made (flag if wrong): adjacent DQL clauses without operator combine 
 
 ## Reuse from prior art
 
-| Asset | Path | Use |
-|---|---|---|
-| Filter parser style (tokenizer → recursive descent → evaluator) | `../cflogs/src/lib/filter.js` | Template for `src/shared/dql` |
-| CSV/JSON writers | `../cflogs/src/lib/output.js` | Port into `src/main/db/export.ts` |
-| JSON1 SQL generation, LIKE escaping, allowlisted sort | `../log-viewer/server.js:186-284, 320-334` | Basis for `query-compiler.ts` |
-| Streaming CSV over cursor | `../log-viewer/server.js:357-430` | Export implementation |
-| Viewer UX (virtualized table, column menu, detail popover, cell renderers, new-entries banner) | `../log-viewer/src/App.jsx` | UX blueprint, reimplemented on TanStack |
-| SAP BTP region catalogue | `~/.nvm/versions/node/v24.14.0/lib/node_modules/btpcflogin/data/regions-data.json` | Copy to `src/shared/regions.ts` (host `api.cf.<region>.hana.ondemand.com`, `cn40` → `.platform.sapcloud.cn`) |
-| Login mode semantics (password / `--origin` / `--sso-passcode`) | btpcflogin `CloudFoundryCli`, cf-sso-login `passcode.ts` | Spec for auth service and passcode window (selectors: `login_hint` origin-chooser, passcode page text) |
+| Asset                                                                                          | Path                                                                               | Use                                                                                                          |
+| ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Filter parser style (tokenizer → recursive descent → evaluator)                                | `../cflogs/src/lib/filter.js`                                                      | Template for `src/shared/dql`                                                                                |
+| CSV/JSON writers                                                                               | `../cflogs/src/lib/output.js`                                                      | Port into `src/main/db/export.ts`                                                                            |
+| JSON1 SQL generation, LIKE escaping, allowlisted sort                                          | `../log-viewer/server.js:186-284, 320-334`                                         | Basis for `query-compiler.ts`                                                                                |
+| Streaming CSV over cursor                                                                      | `../log-viewer/server.js:357-430`                                                  | Export implementation                                                                                        |
+| Viewer UX (virtualized table, column menu, detail popover, cell renderers, new-entries banner) | `../log-viewer/src/App.jsx`                                                        | UX blueprint, reimplemented on TanStack                                                                      |
+| SAP BTP region catalogue                                                                       | `~/.nvm/versions/node/v24.14.0/lib/node_modules/btpcflogin/data/regions-data.json` | Copy to `src/shared/regions.ts` (host `api.cf.<region>.hana.ondemand.com`, `cn40` → `.platform.sapcloud.cn`) |
+| Login mode semantics (password / `--origin` / `--sso-passcode`)                                | btpcflogin `CloudFoundryCli`, cf-sso-login `passcode.ts`                           | Spec for auth service and passcode window (selectors: `login_hint` origin-chooser, passcode page text)       |
 
 ## Architecture
 
@@ -126,12 +126,12 @@ Push events: `stream:batch`, `stream:status`, `auth:required`, `workspace:change
 
 ```ts
 interface EntryQuery {
-  sessionIds?: number[];              // scope; omitted = whole workspace
-  dql?: string;                       // parsed + compiled in main
-  time?: TimeFilter;                  // {kind:'relative',amount,unit:'m'|'h'|'d'} | {kind:'absolute',fromMs?,toMs?}; relative resolved in main
-  sort: {key: string; dir: 'asc'|'desc'}[];   // default ts_ns desc, id desc
-  snapshotId?: number;                // rows with id > snapshotId excluded → stable paging while streaming
-  paging: {limit: number; offset: number};
+  sessionIds?: number[]; // scope; omitted = whole workspace
+  dql?: string; // parsed + compiled in main
+  time?: TimeFilter; // {kind:'relative',amount,unit:'m'|'h'|'d'} | {kind:'absolute',fromMs?,toMs?}; relative resolved in main
+  sort: { key: string; dir: 'asc' | 'desc' }[]; // default ts_ns desc, id desc
+  snapshotId?: number; // rows with id > snapshotId excluded → stable paging while streaming
+  paging: { limit: number; offset: number };
 }
 // entries:count → {total, maxId}; "new entries" = count with id > snapshotId
 ```
@@ -144,14 +144,26 @@ AST (shared by parser, evaluator and SQL compiler):
 
 ```ts
 type DqlNode =
-  | {type:'match_all'}
-  | {type:'and'; children: DqlNode[]} | {type:'or'; children: DqlNode[]} | {type:'not'; child: DqlNode}
-  | {type:'term'; value: Literal}                                  // free text → message/raw LIKE
-  | {type:'match'; field: FieldRef; value: Literal}                // field:value, field:"phrase"
-  | {type:'exists'; field: FieldRef}                               // field:*
-  | {type:'range'; field: FieldRef; op:'>'|'>='|'<'|'<='; value: Literal};
-interface FieldRef {name: string; path: string[]; hasWildcard: boolean; span?: Span}
-interface Literal {raw: string; quoted: boolean; hasWildcard: boolean; span?: Span}
+  | { type: 'match_all' }
+  | { type: 'and'; children: DqlNode[] }
+  | { type: 'or'; children: DqlNode[] }
+  | { type: 'not'; child: DqlNode }
+  | { type: 'term'; value: Literal } // free text → message/raw LIKE
+  | { type: 'match'; field: FieldRef; value: Literal } // field:value, field:"phrase"
+  | { type: 'exists'; field: FieldRef } // field:*
+  | { type: 'range'; field: FieldRef; op: '>' | '>=' | '<' | '<='; value: Literal };
+interface FieldRef {
+  name: string;
+  path: string[];
+  hasWildcard: boolean;
+  span?: Span;
+}
+interface Literal {
+  raw: string;
+  quoted: boolean;
+  hasWildcard: boolean;
+  span?: Span;
+}
 ```
 
 - Tokenizer never throws (error-tolerant for highlighting); parser is recursive descent; `field:(a or b)` is desugared into `or/and/not` over `match` nodes; errors carry positions and specific messages.
@@ -185,23 +197,23 @@ electron-builder: `nsis` (win x64), `dmg`+`zip` (mac x64/arm64), `AppImage`+`deb
 
 ## Milestones (single developer, ~65 working days)
 
-| # | Milestone | Deliverable | Days |
-|---|---|---|---|
-| M0 | Scaffold | electron-vite + React + TS strict, Tailwind/shadcn, eslint/prettier, vitest/RTL/Playwright wiring, preload bridge, zod contracts, electron-log, CSP, mock IPC backend for renderer dev | 3 |
-| M1 | DQL package | tokenizer, parser, AST, evaluator, wildcard, cursor, stringify, table-driven tests (unblocks compiler and query bar) | 4 |
-| M2 | Auth + CF client | discovery, undici http w/ TLS options, TokenManager (password, origin, refresh, safeStorage), passcode window + manual paste, CC v3 orgs/spaces/apps; mock UAA/CC tests | 5 |
-| M3 | Log Cache streaming | log-cache client, poller (recent, walk, dedupe, backoff, abort) with mock server tests | 3 |
-| M4 | Storage | workspace manager, schema/migrations, writer pipeline, sessions lifecycle, `stream:batch`, retention | 3 |
-| M5 | Query engine | AST→SQL compiler, `entries:query/count/values`, props discovery, time filters, snapshot paging; heavy tests incl. SQL vs evaluator equivalence | 4 |
-| M6 | App shell + workspaces + connections UI | AppShell, theme, zustand persistence, workspace switcher/manage, connections dialog, login flows, auth guard | 5 |
-| M7 | Streams panel | cascading pickers, multi-select, start/stop, status, colours; **first end-to-end integration checkpoint** | 3 |
-| M8 | Log table core | snapshot paging via TanStack Query + Virtual, fixed + dynamic columns, column picker, sort/reorder/resize/pin, persistence, level tint | 7 |
-| M9 | Query bar | CodeMirror editor, highlight, lint, autocomplete, history, saved filters | 5 |
-| M10 | Time + refresh + tail | time filter popover, live mode, auto refresh, new-entries banner, tail with interaction pause | 4 |
-| M11 | Detail + interaction | detail panel/JSON view, rich cells, selection, keyboard nav, copy / filter-for-value | 4 |
-| M12 | Export + sessions | streamed JSON/CSV export with progress/cancel, sessions panel + scope chip, retention settings UI | 4 |
-| M13 | Packaging + CI | three-OS builds, native rebuild, release workflow, auto-update optional | 3 |
-| M14 | Hardening | perf on 1M rows (EXPLAIN QUERY PLAN, promoted columns if needed), a11y pass, Playwright smoke, token-expiry edge cases, docs | 8 |
+| #   | Milestone                               | Deliverable                                                                                                                                                                            | Days |
+| --- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| M0  | Scaffold                                | electron-vite + React + TS strict, Tailwind/shadcn, eslint/prettier, vitest/RTL/Playwright wiring, preload bridge, zod contracts, electron-log, CSP, mock IPC backend for renderer dev | 3    |
+| M1  | DQL package                             | tokenizer, parser, AST, evaluator, wildcard, cursor, stringify, table-driven tests (unblocks compiler and query bar)                                                                   | 4    |
+| M2  | Auth + CF client                        | discovery, undici http w/ TLS options, TokenManager (password, origin, refresh, safeStorage), passcode window + manual paste, CC v3 orgs/spaces/apps; mock UAA/CC tests                | 5    |
+| M3  | Log Cache streaming                     | log-cache client, poller (recent, walk, dedupe, backoff, abort) with mock server tests                                                                                                 | 3    |
+| M4  | Storage                                 | workspace manager, schema/migrations, writer pipeline, sessions lifecycle, `stream:batch`, retention                                                                                   | 3    |
+| M5  | Query engine                            | AST→SQL compiler, `entries:query/count/values`, props discovery, time filters, snapshot paging; heavy tests incl. SQL vs evaluator equivalence                                         | 4    |
+| M6  | App shell + workspaces + connections UI | AppShell, theme, zustand persistence, workspace switcher/manage, connections dialog, login flows, auth guard                                                                           | 5    |
+| M7  | Streams panel                           | cascading pickers, multi-select, start/stop, status, colours; **first end-to-end integration checkpoint**                                                                              | 3    |
+| M8  | Log table core                          | snapshot paging via TanStack Query + Virtual, fixed + dynamic columns, column picker, sort/reorder/resize/pin, persistence, level tint                                                 | 7    |
+| M9  | Query bar                               | CodeMirror editor, highlight, lint, autocomplete, history, saved filters                                                                                                               | 5    |
+| M10 | Time + refresh + tail                   | time filter popover, live mode, auto refresh, new-entries banner, tail with interaction pause                                                                                          | 4    |
+| M11 | Detail + interaction                    | detail panel/JSON view, rich cells, selection, keyboard nav, copy / filter-for-value                                                                                                   | 4    |
+| M12 | Export + sessions                       | streamed JSON/CSV export with progress/cancel, sessions panel + scope chip, retention settings UI                                                                                      | 4    |
+| M13 | Packaging + CI                          | three-OS builds, native rebuild, release workflow, auto-update optional                                                                                                                | 3    |
+| M14 | Hardening                               | perf on 1M rows (EXPLAIN QUERY PLAN, promoted columns if needed), a11y pass, Playwright smoke, token-expiry edge cases, docs                                                           | 8    |
 
 Order rationale: auth and Log Cache streaming are the highest-risk unknowns (IdP page variance, Log Cache ordering), so they come right after the shared DQL package; UI work from M6 on runs against the mock backend and integrates at M7 and M10.
 

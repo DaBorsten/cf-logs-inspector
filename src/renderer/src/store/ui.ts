@@ -4,6 +4,7 @@ import { persist } from 'zustand/middleware';
 export type Theme = 'light' | 'dark' | 'system';
 export type SidePanelTab = 'streams' | 'sessions' | 'connections';
 export type ConnectionEditor = { mode: 'create' } | { mode: 'edit'; id: string };
+export type DetailTab = 'message' | 'table' | 'json' | 'raw';
 
 export interface StreamPickerState {
   connectionId: string | null;
@@ -28,6 +29,9 @@ interface UiState {
   closeConnectionEditor(): void;
   workspaceDialogOpen: boolean;
   setWorkspaceDialogOpen(open: boolean): void;
+  /** Tab the detail panel opens on; falls back to `message` when an entry has no parsed JSON. */
+  defaultDetailTab: DetailTab;
+  setDefaultDetailTab(tab: DetailTab): void;
   /** Last connection/org/space chosen in the streams picker (survives tab switches and restarts). */
   streamPicker: StreamPickerState;
   setStreamPicker(patch: Partial<StreamPickerState>): void;
@@ -61,6 +65,8 @@ export const useUiStore = create<UiState>()(
       closeConnectionEditor: () => set({ connectionEditor: null }),
       workspaceDialogOpen: false,
       setWorkspaceDialogOpen: (workspaceDialogOpen) => set({ workspaceDialogOpen }),
+      defaultDetailTab: 'table',
+      setDefaultDetailTab: (defaultDetailTab) => set({ defaultDetailTab }),
       streamPicker: initialStreamPicker,
       setStreamPicker: (patch) => set((s) => ({ streamPicker: { ...s.streamPicker, ...patch } })),
     }),
@@ -70,6 +76,7 @@ export const useUiStore = create<UiState>()(
         theme: s.theme,
         sidePanelTab: s.sidePanelTab,
         sidePanelOpen: s.sidePanelOpen,
+        defaultDetailTab: s.defaultDetailTab,
         streamPicker: s.streamPicker,
       }),
     },

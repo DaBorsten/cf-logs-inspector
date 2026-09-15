@@ -7,6 +7,11 @@ interface SelectionState {
   clear(): void;
   /** Detail panel visibility (independent of selection so it can be closed and reopened). */
   detailOpen: boolean;
+  /**
+   * Once the user has manually toggled `detailOpen` (closing or reopening it), selection changes
+   * stop auto-opening the panel; only the explicit toggle controls visibility from then on.
+   */
+  detailAutoOpenDisabled: boolean;
   setDetailOpen(open: boolean): void;
 }
 
@@ -16,9 +21,11 @@ export const useSelectionStore = create<SelectionState>()((set) => ({
   setSelection: (next) =>
     set((s) => {
       const selection = typeof next === 'function' ? next(s.selection) : next;
-      return { selection, detailOpen: selection.focus !== null ? true : s.detailOpen };
+      const autoOpen = selection.focus !== null && !s.detailAutoOpenDisabled;
+      return { selection, detailOpen: autoOpen ? true : s.detailOpen };
     }),
   clear: () => set({ selection: EMPTY_SELECTION }),
   detailOpen: false,
-  setDetailOpen: (detailOpen) => set({ detailOpen }),
+  detailAutoOpenDisabled: false,
+  setDetailOpen: (detailOpen) => set({ detailOpen, detailAutoOpenDisabled: true }),
 }));

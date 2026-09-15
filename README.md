@@ -56,11 +56,11 @@ pnpm package
 
 `pnpm package` produces an installer for your current platform under `release/`:
 
-| Platform | Output |
-|---|---|
-| Windows | NSIS installer (`.exe`) and `.zip` |
-| macOS | `.dmg` and `.zip` (category: Developer Tools) |
-| Linux | `.AppImage` and `.zip` (category: Development) |
+| Platform | Output                                         |
+| -------- | ---------------------------------------------- |
+| Windows  | NSIS installer (`.exe`) and `.zip`             |
+| macOS    | `.dmg` and `.zip` (category: Developer Tools)  |
+| Linux    | `.AppImage` and `.zip` (category: Development) |
 
 ## Getting Started
 
@@ -99,17 +99,17 @@ This also rebuilds `better-sqlite3` for Electron via the `postinstall` script.
 
 ### Common commands
 
-| Command | Description |
-|---|---|
-| `pnpm dev` | Start Electron with hot reload |
-| `pnpm test` | Run the vitest suite (runs under Electron's Node so the native `better-sqlite3` binary loads) |
-| `pnpm test:watch` | Run tests in watch mode |
-| `pnpm test:node` | Run tests under plain Node/vitest instead of Electron |
-| `pnpm typecheck` | Type-check the whole project |
-| `pnpm lint` | Run eslint |
-| `pnpm format` | Format the codebase with prettier |
-| `pnpm build` | Bundle main/preload/renderer into `out/` |
-| `pnpm package` | Build installers with electron-builder into `release/` |
+| Command           | Description                                                                                   |
+| ----------------- | --------------------------------------------------------------------------------------------- |
+| `pnpm dev`        | Start Electron with hot reload                                                                |
+| `pnpm test`       | Run the vitest suite (runs under Electron's Node so the native `better-sqlite3` binary loads) |
+| `pnpm test:watch` | Run tests in watch mode                                                                       |
+| `pnpm test:node`  | Run tests under plain Node/vitest instead of Electron                                         |
+| `pnpm typecheck`  | Type-check the whole project                                                                  |
+| `pnpm lint`       | Run eslint                                                                                    |
+| `pnpm format`     | Format the codebase with prettier                                                             |
+| `pnpm build`      | Bundle main/preload/renderer into `out/`                                                      |
+| `pnpm package`    | Build installers with electron-builder into `release/`                                        |
 
 ### Code style
 

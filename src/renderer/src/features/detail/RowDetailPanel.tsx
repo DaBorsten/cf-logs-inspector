@@ -15,13 +15,22 @@ import { useKvJson } from '../../queries/kv';
 import { qk } from '../../queries/keys';
 import { useQueryStore } from '../../store/query';
 import { useSelectionStore } from '../../store/selection';
+import { useUiStore } from '../../store/ui';
 import { Highlighted, buildHighlightTerms } from '../log-table/highlight';
 import { levelClass } from '../log-table/columns';
-import { JsonTree } from './JsonTree';
+import { JsonPlain } from './JsonPlain';
+import { JsonTable } from './JsonTable';
 
 export const DETAIL_KV_KEY = 'layout.detail';
 const MIN_HEIGHT = 120;
 const DEFAULT_HEIGHT = 280;
+
+const DETAIL_TAB_LABELS: Record<'message' | 'table' | 'json' | 'raw', string> = {
+  message: 'Message',
+  table: 'Table',
+  json: 'JSON',
+  raw: 'Raw',
+};
 
 export async function copyText(text: string, what = 'Copied'): Promise<void> {
   try {
@@ -107,7 +116,7 @@ function DetailBody({ id, onClose }: { id: number; onClose: () => void }): React
       </div>
     );
   }
-  return <DetailContent entry={data} onClose={onClose} />;
+  return <DetailContent key={data.id} entry={data} onClose={onClose} />;
 }
 
 const FIXED_ROWS: { label: string; field: string; get: (e: EntryDetail) => unknown }[] = [
@@ -131,9 +140,10 @@ function DetailContent({
   const dql = useQueryStore((s) => s.dql);
   const setDql = useQueryStore((s) => s.setDql);
   const terms = React.useMemo(() => buildHighlightTerms(dql), [dql]);
-  const [tab, setTab] = React.useState<'message' | 'json' | 'raw'>(
-    entry.props ? 'json' : 'message',
-  );
+  const defaultDetailTab = useUiStore((s) => s.defaultDetailTab);
+  const setDefaultDetailTab = useUiStore((s) => s.setDefaultDetailTab);
+  const needsProps = defaultDetailTab === 'table' || defaultDetailTab === 'json';
+  const tab = needsProps && !entry.props ? 'message' : defaultDetailTab;
 
   const filter = (field: string, value: unknown, negate: boolean): void => {
     const next = appendClause(dql, field, value, negate);
@@ -171,22 +181,22 @@ function DetailContent({
           role="tablist"
           aria-label="Detail view"
         >
-          {(['message', 'json', 'raw'] as const).map((t) => (
+          {(['message', 'table', 'json', 'raw'] as const).map((t) => (
             <button
               key={t}
               type="button"
               role="tab"
               aria-selected={tab === t}
-              disabled={t === 'json' && !entry.props}
+              disabled={(t === 'table' || t === 'json') && !entry.props}
               className={cn(
-                'rounded px-2 py-0.5 text-[11px] capitalize disabled:opacity-40',
+                'rounded px-2 py-0.5 text-[11px] disabled:opacity-40',
                 tab === t
                   ? 'bg-accent text-accent-foreground'
                   : 'text-muted-foreground hover:text-foreground',
               )}
-              onClick={() => setTab(t)}
+              onClick={() => setDefaultDetailTab(t)}
             >
-              {t}
+              {DETAIL_TAB_LABELS[t]}
             </button>
           ))}
         </div>
@@ -222,12 +232,14 @@ function DetailContent({
             <pre className="font-mono text-[12px] leading-5 break-words whitespace-pre-wrap">
               <Highlighted text={entry.message} terms={terms} />
             </pre>
-          ) : tab === 'json' && entry.props ? (
-            <JsonTree
+          ) : tab === 'table' && entry.props ? (
+            <JsonTable
               value={entry.props}
               onFilter={filter}
               onCopy={(text) => void copyText(text)}
             />
+          ) : tab === 'json' && entry.props ? (
+            <JsonPlain value={entry.props} />
           ) : (
             <pre className="font-mono text-[12px] leading-5 break-all whitespace-pre-wrap">
               <Highlighted text={entry.raw} terms={terms} />
