@@ -50,6 +50,12 @@ export function RowDetailPanel(): React.JSX.Element | null {
   const [dragHeight, setDragHeight] = React.useState<number | null>(null);
   const height = dragHeight ?? Math.max(MIN_HEIGHT, layout.value.height || DEFAULT_HEIGHT);
 
+  React.useEffect(() => {
+    if (dragHeight !== null && layout.value.height === dragHeight) {
+      setDragHeight(null);
+    }
+  }, [dragHeight, layout.value.height]);
+
   const startDrag = (e: React.MouseEvent): void => {
     e.preventDefault();
     const startY = e.clientY;
@@ -62,7 +68,6 @@ export function RowDetailPanel(): React.JSX.Element | null {
     const onUp = (): void => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      setDragHeight(null);
       layout.set({ height: next });
     };
     document.addEventListener('mousemove', onMove);
