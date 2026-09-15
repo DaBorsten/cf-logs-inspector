@@ -12,6 +12,7 @@ import type { LogSession } from '@shared/model/session';
 import type { SavedFilter } from '@shared/model/filters';
 import type { ExportRequest } from '@shared/model/export';
 import type { WorkspaceInfo } from '@shared/model/workspace';
+import type { UpdateStatus } from '@shared/model/update';
 import type { PreloadApi } from '@shared/ipc/bridge';
 
 export interface MockState {
@@ -41,6 +42,10 @@ export interface MockState {
   calls: { channel: string; req: unknown }[];
   version: string;
   pickFileResult: string | null;
+  packaged: boolean;
+  updateStatus: UpdateStatus;
+  /** Version `update:check` finds when simulating an available update. */
+  availableVersion: string | null;
 }
 
 export interface MockApi {
@@ -98,6 +103,9 @@ export function defaultMockState(): MockState {
     calls: [],
     version: '0.1.0-mock',
     pickFileResult: null,
+    packaged: false,
+    updateStatus: { state: 'idle', supported: false },
+    availableVersion: null,
   };
 }
 
@@ -182,6 +190,25 @@ export function createMockApi(init: Partial<MockState> = {}): MockApi {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handlers: { [K in keyof IpcContracts]: (req: IpcContracts[K]['req']) => any } = {
     'app:version': () => state.version,
+    'app:info': () => ({ version: state.version, packaged: state.packaged, platform: 'win32' }),
+    'update:status': () => state.updateStatus,
+    'update:check': () => {
+      if (!state.packaged) return state.updateStatus;
+      state.updateStatus = state.availableVersion
+        ? { state: 'available', version: state.availableVersion, supported: true }
+        : { state: 'not-available', supported: true };
+      emit('update:status', state.updateStatus);
+      return state.updateStatus;
+    },
+    'update:download': () => {
+      if (!state.packaged || state.updateStatus.state !== 'available') return state.updateStatus;
+      state.updateStatus = state.updateStatus.version
+        ? { state: 'downloaded', version: state.updateStatus.version, supported: true }
+        : { state: 'downloaded', supported: true };
+      emit('update:status', state.updateStatus);
+      return state.updateStatus;
+    },
+    'update:install': () => undefined,
     'entries:validateDql': ({ dql }) => {
       const r = parse(dql);
       return r.ok ? { ok: true } : { ok: false, error: r.error };

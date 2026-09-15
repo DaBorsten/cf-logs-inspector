@@ -1,6 +1,6 @@
 {
   "name": "cf-log-inspector",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Desktop app to stream, store and analyze Cloud Foundry application logs",
   "main": "./out/main/index.js",
   "type": "module",
@@ -26,6 +26,7 @@
   "dependencies": {
     "better-sqlite3": "^12.8.0",
     "electron-log": "^5.4.0",
+    "electron-updater": "^6.8.9",
     "undici": "^7.10.0",
     "zod": "^4.1.0"
   },

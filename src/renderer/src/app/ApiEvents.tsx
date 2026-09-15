@@ -43,6 +43,10 @@ export function ApiEvents(): null {
     void qc.invalidateQueries({ queryKey: qk.sessions });
   });
 
+  useApiEvent('update:status', (status) => {
+    qc.setQueryData(qk.updateStatus, status);
+  });
+
   useApiEvent('stream:batch', () => {
     void qc.invalidateQueries({ queryKey: qk.sessions });
     void qc.invalidateQueries({ queryKey: qk.workspaceStats });

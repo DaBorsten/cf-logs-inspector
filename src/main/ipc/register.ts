@@ -10,6 +10,7 @@ import { registerFilterHandlers } from './filters.handlers';
 import { handle } from './handle';
 import { validateDqlSchema } from './schemas';
 import { registerSessionHandlers } from './session.handlers';
+import { registerUpdateHandlers } from './update.handlers';
 import { registerWorkspaceHandlers } from './workspace.handlers';
 
 /** Registers all invoke handlers. Domain handlers live in `*.handlers.ts` files. */
@@ -36,4 +37,5 @@ export function registerIpcHandlers(ctx: AppContext): void {
   registerEntryHandlers(ctx);
   registerFilterHandlers(ctx);
   registerExportHandlers(ctx);
+  registerUpdateHandlers(ctx);
 }

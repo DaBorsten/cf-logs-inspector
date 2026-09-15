@@ -15,4 +15,6 @@ export const qk = {
   entries: ['entries'] as const,
   props: ['props'] as const,
   filters: ['filters'] as const,
+  appInfo: ['app', 'info'] as const,
+  updateStatus: ['app', 'update'] as const,
 };

@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { UpdateDialog } from '../features/update/UpdateDialog';
 import { formatCount } from '../lib/utils';
 import { useAppVersion, useSessions } from '../queries/sessions';
 import { useCurrentWorkspace, useWorkspaceStats } from '../queries/workspaces';
@@ -8,6 +9,7 @@ export function StatusBar(): React.JSX.Element {
   const { data: stats } = useWorkspaceStats(Boolean(workspace));
   const { data: sessions } = useSessions(Boolean(workspace));
   const { data: version } = useAppVersion();
+  const [updateDialogOpen, setUpdateDialogOpen] = React.useState(false);
   const running = sessions?.filter((s) => s.status !== 'stopped').length ?? 0;
   return (
     <footer className="flex h-6 shrink-0 items-center gap-4 border-t bg-card px-3 text-[11px] text-muted-foreground">
@@ -29,7 +31,15 @@ export function StatusBar(): React.JSX.Element {
         <span>No workspace open</span>
       )}
       <span className="flex-1" />
-      <span>v{version ?? '…'}</span>
+      <button
+        type="button"
+        onClick={() => setUpdateDialogOpen(true)}
+        className="rounded px-1 hover:bg-accent hover:text-accent-foreground"
+        title="Version info and updates"
+      >
+        v{version ?? '…'}
+      </button>
+      <UpdateDialog open={updateDialogOpen} onOpenChange={setUpdateDialogOpen} />
     </footer>
   );
 }

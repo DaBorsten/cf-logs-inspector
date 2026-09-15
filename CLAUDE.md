@@ -47,7 +47,8 @@ deliberately does not depend on the `cf` CLI.
 | M11 detail + interaction                   | done (2026-09-10): row selection (click/Ctrl/Shift, arrows/Page/Home/End, Ctrl+A, Escape), Ctrl+C copies NDJSON via entries:get, resizable detail panel (message/JSON tree/raw tabs, fields sidebar, copy buttons, filter for/out), query term highlighting, multi-line markers; 677 tests.                                                                                                                                                                                                                                                 |
 | M12 export + sessions                      | done (2026-09-10): streaming NDJSON/JSON/CSV export (`ExportJob`/`ExportManager`), `export:*` IPC + progress/done/failed push events, `ExportDialog` (format/scope/columns, progress, cancel, reveal), session scoping + "set time range to session" (`session:range`) with a query-bar scope chip, retention settings UI in the workspace dialog; 702 tests, typecheck/lint clean.                                                                                                                                                         |
 | M13 packaging + CI                         | done (2026-09-11): electron-builder targets were already in place; added GitHub Actions CI (`ci.yml`: ubuntu-only lint/typecheck, then test+build matrix on ubuntu/windows/macos) and a tag-triggered release workflow (`release.yml`: `v*.*.*` tags build and `electron-builder --publish always` per OS into one draft GitHub Release), `packageManager` pin (`pnpm@10.6.5`) for corepack, `publish` block in `electron-builder.yml` (GitHub, draft). Unsigned builds; auto-update out of scope. Not yet exercised by pushing a real tag. |
-| M14+                                       | not started                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| M14 auto-update                            | done (2026-09-15): `electron-updater` wrapped in `UpdateManager` (autoDownload/autoInstallOnAppQuit off, so the renderer drives check -> download -> install explicitly), GitHub provider reuses `electron-builder.yml`'s existing `publish` block; `app:info`, `update:status/check/download/install` IPC + `update:status` push event; `UpdateDialog` opened by clicking the version in the `StatusBar`, shows install/available/downloaded state and a progress percent; disabled (`supported: false`) in dev/unpackaged builds. Not yet exercised against a real published GitHub release. |
+| M15+                                       | not started                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 `pnpm dev` was verified on Windows on 2026-09-10 (window shows the placeholder with the app version). The M2
 code has only been tested against the in-process mock (`test/fixtures/mock-cf.ts`); the first real-foundation
@@ -138,6 +139,11 @@ src/renderer/src/test/codemirror.ts    queryEditorView/setQueryText/pressInQuery
 src/shared/model/filters.ts            SavedFilter/SavedFilterInput, QUERY_HISTORY_KV_KEY/LIMIT
 src/main/db/repos/filters.ts           listFilters/saveFilter (upsert by id or case-insensitive name)/deleteFilter; ipc/filters.handlers.ts
 src/renderer/src/api/mock/entries.ts   makeMockEntries(n, opts) + propsOf(entries) fixture generators
+src/main/update/update-manager.ts      UpdateManager wraps electron-updater's autoUpdater -> single UpdateStatus (see M14 section)
+src/main/ipc/update.handlers.ts        app:info, update:status/check/download/install
+src/renderer/src/queries/update.ts     useAppInfo, useUpdateStatus, useCheckForUpdate/useDownloadUpdate/useInstallUpdate
+src/renderer/src/features/update/UpdateDialog.tsx  opened by clicking the version in StatusBar; status badge + check/download/install button
+src/shared/model/update.ts             UpdateState, UpdateStatus, AppInfo
 src/renderer/src/test/render.tsx setupMock(state) + renderWithProviders + sampleConnection for component tests
 src/renderer/src/styles/globals.css Tailwind 4 import, shadcn-style tokens (light/dark via .dark), base layer
 src/shared/ipc/contracts.ts   IpcContracts, INVOKE_CHANNELS, PushEvents, PUSH_EVENTS (add channels here first)
@@ -515,13 +521,46 @@ inSnapshot.total` drives the "N new entries · show" pill; `refresh()` refetches
   `cache: pnpm`.
 - Actions are pinned to their latest majors (checked 2026-09-11): `actions/checkout@v7`,
   `actions/setup-node@v7`, `pnpm/action-setup@v6`.
-- Out of scope for this pass: code signing (unsigned win/mac builds), auto-update.
+- Out of scope for this pass: code signing (unsigned win/mac builds); auto-update landed in M14.
 - Verified 2026-09-14: per-OS artifacts land in a draft release via `release.yml`. The rebuilt
   draft-first workflow has not yet been exercised end to end (draft `v0.2.0` must exist, then push to main).
 
-## Next milestone: M14+
+## M14 auto-update: how it works (done)
 
-Not started; see `docs/DEVELOPMENT_PLAN.md` for later milestones (real-foundation verification, auto-update,
+- `src/main/update/update-manager.ts`: `UpdateManager` wraps `electron-updater`'s singleton `autoUpdater`
+  behind an `AutoUpdaterLike` interface (its `on`/`checkForUpdates`/`downloadUpdate`/`quitAndInstall` slice)
+  so it is unit-testable without Electron (`__tests__/update-manager.test.ts` uses a fake). Sets
+  `autoDownload = false` and `autoInstallOnAppQuit = false` so the renderer explicitly drives
+  check -> download -> install rather than the library doing it silently in the background. Turns the
+  event emitter into one `UpdateStatus` (`idle|checking|available|not-available|downloading|downloaded|error`,
+  plus `version`/`percent`/`message`), reported via `onStatus` after every transition. `supported` is
+  `app.isPackaged` from `index.ts` — dev runs never call into `autoUpdater` at all (`check()`/`download()`
+  are no-ops that return the current, unsupported status). `install()` only calls `quitAndInstall()` once a
+  download has actually finished.
+- Reuses `electron-builder.yml`'s existing `publish` block (GitHub, `DevEpos/cf-logs-inspector`, draft
+  releases) as the update feed's provider config automatically — no separate `app-update.yml` was hand-written.
+  Consequence: an update is only visible to `autoUpdater` once its GitHub Release draft is published (matches
+  the M13 release flow); a draft alone does not trigger `update-available`.
+- IPC (`src/main/ipc/update.handlers.ts`): `app:info` (version/packaged/platform, so the renderer can grey out
+  the check button in dev), `update:status` (read cached state, no network), `update:check`, `update:download`,
+  `update:install`; `update:status` is also a push event (`AppContext.updates.onStatus` -> `pushEvent`) so a
+  progress bar updates live without polling.
+- Renderer: clicking the version number in `StatusBar` opens `features/update/UpdateDialog.tsx` (local
+  `open` state, no global UI store entry needed) — shows the installed version, a status badge
+  (checking/available/downloading with percent/downloaded/up to date/error) and one action button that
+  changes with state (Check for updates -> Download update -> Restart & install). `queries/update.ts` holds
+  `useAppInfo`/`useUpdateStatus` (query) and `useCheckForUpdate`/`useDownloadUpdate`/`useInstallUpdate`
+  (mutations that also `setQueryData` on success); `ApiEvents` mirrors the `update:status` push event into
+  the same query key (`qk.updateStatus`) so the dialog stays live even if a check was started elsewhere.
+- Mock (`api/mock/mock-api.ts`) added `packaged`, `updateStatus`, `availableVersion` state (all default to
+  "unsupported / nothing found") plus the four handlers, so component tests and browser-only dev keep working
+  without touching `electron-updater`.
+- Not yet exercised end to end: no real update has been checked/downloaded/installed against a published
+  GitHub release (needs a packaged build pointed at an actual newer draft-turned-published release).
+
+## Next milestone: M15+
+
+Not started; see `docs/DEVELOPMENT_PLAN.md` for later milestones (real-foundation verification, code signing,
 etc.) before picking the next scope of work.
 
 ## Platform notes

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, session, shell } from 'electron';
 import { join } from 'node:path';
 import log from 'electron-log/main';
+import updater from 'electron-updater';
 import { ConnectionManager } from './cf/connection-manager';
 import type { AppContext } from './context';
 import { ExportManager } from './db/export-manager';
@@ -10,9 +11,13 @@ import { registerIpcHandlers } from './ipc/register';
 import { pushEvent } from './ipc/push';
 import { ConnectionStore } from './store/connections';
 import { safeStorageEncryptor } from './store/safe-storage';
+import { UpdateManager } from './update/update-manager';
+
+const { autoUpdater } = updater;
 
 log.initialize();
 log.transports.file.level = 'info';
+autoUpdater.logger = log.scope('updater');
 
 const isDev = !app.isPackaged;
 
@@ -101,12 +106,20 @@ async function createContext(): Promise<AppContext> {
     onDone: (ev) => pushEvent('export:done', ev),
     onFailed: (ev) => pushEvent('export:failed', ev),
   });
+  // Squirrel/AppImage-less dev runs and non-nsis Linux targets are not meaningfully updatable;
+  // electron-updater itself would throw on `checkForUpdates()` in those cases.
+  const updates = new UpdateManager({
+    autoUpdater,
+    logger,
+    supported: app.isPackaged,
+    onStatus: (status) => pushEvent('update:status', status),
+  });
   try {
     await workspaces.openLastOrDefault();
   } catch (err) {
     logger.error(`could not open a workspace at startup: ${String(err)}`);
   }
-  return { connections, workspaces, streams, exports, logger };
+  return { connections, workspaces, streams, exports, updates, logger };
 }
 
 if (!app.requestSingleInstanceLock()) {

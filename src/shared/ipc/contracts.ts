@@ -37,6 +37,7 @@ import type {
   ExportStarted,
 } from '../model/export';
 import type { SessionRange } from '../model/session';
+import type { AppInfo, UpdateStatus } from '../model/update';
 
 export interface IpcError {
   code: string;
@@ -54,6 +55,17 @@ export interface DqlValidation {
 export interface IpcContracts {
   'app:version': { req: void; res: string };
   'entries:validateDql': { req: { dql: string }; res: DqlValidation };
+
+  // ---- app updates (M14) ----
+  'app:info': { req: void; res: AppInfo };
+  /** Current cached update status; does not start a check. */
+  'update:status': { req: void; res: UpdateStatus };
+  /** Starts (or no-ops onto) a check against the GitHub releases feed. */
+  'update:check': { req: void; res: UpdateStatus };
+  /** Starts (or no-ops onto) downloading the update found by the last check. */
+  'update:download': { req: void; res: UpdateStatus };
+  /** Quits and installs a downloaded update. */
+  'update:install': { req: void; res: void };
 
   // ---- connections (M2) ----
   'connection:list': { req: void; res: ConnectionProfile[] };
@@ -140,6 +152,11 @@ export interface IpcContracts {
 export const INVOKE_CHANNELS = [
   'app:version',
   'entries:validateDql',
+  'app:info',
+  'update:status',
+  'update:check',
+  'update:download',
+  'update:install',
   'connection:list',
   'connection:save',
   'connection:delete',
@@ -198,6 +215,8 @@ export interface PushEvents {
   'export:progress': ExportProgressEvent;
   'export:done': ExportDoneEvent;
   'export:failed': ExportFailedEvent;
+  /** The update check/download state machine advanced. */
+  'update:status': UpdateStatus;
 }
 
 export const PUSH_EVENTS = [
@@ -209,4 +228,5 @@ export const PUSH_EVENTS = [
   'export:progress',
   'export:done',
   'export:failed',
+  'update:status',
 ] as const satisfies readonly (keyof PushEvents)[];

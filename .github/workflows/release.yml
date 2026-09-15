@@ -42,8 +42,10 @@ jobs:
     needs: check-draft
     strategy:
       fail-fast: false
+      # TEMPORARY: Windows-only while bringing up releases on the DaBorsten fork. Restore
+      # [ubuntu-latest, windows-latest, macos-latest] once mac/linux builds are needed again.
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7

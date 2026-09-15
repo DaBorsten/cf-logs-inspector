@@ -9,7 +9,7 @@ asarUnpack:
   - '**/*.node'
 publish:
   provider: github
-  owner: DevEpos
+  owner: DaBorsten
   repo: cf-logs-inspector
   releaseType: draft
 win:
