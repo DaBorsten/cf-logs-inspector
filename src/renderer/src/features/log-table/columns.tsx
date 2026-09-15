@@ -1,11 +1,13 @@
 import * as React from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
+import { ChevronDown } from 'lucide-react';
 import type { EntryRow, PropInfo } from '@shared/model/query';
 import { Badge } from '../../components/ui/badge';
 import { appColor } from '../../lib/colors';
 import { formatTimestamp, subMillisDigits, type TimeZoneMode } from '../../lib/time';
 import { cn } from '../../lib/utils';
 import { Highlighted } from './highlight';
+import { previewLines, valueLines } from './multiline';
 import './table-meta';
 
 export const PROP_PREFIX = 'p:';
@@ -13,6 +15,11 @@ export const PROP_PREFIX = 'p:';
 /** Column id -> DQL/sort field. Dynamic columns are `p:<key>`. */
 export function sortKeyOf(columnId: string): string {
   return columnId.startsWith(PROP_PREFIX) ? columnId.slice(PROP_PREFIX.length) : columnId;
+}
+
+/** Columns whose cells may hold multi-line string values and get the preview/expand treatment. */
+export function isMultilineColumn(columnId: string): boolean {
+  return columnId === 'message' || columnId.startsWith(PROP_PREFIX);
 }
 
 export interface ColumnLayout {
@@ -82,6 +89,67 @@ export function JsonValue({ value }: { value: unknown }): React.JSX.Element | nu
     return <span className="text-primary">{String(value)}</span>;
   }
   return <span className="text-muted-foreground">{JSON.stringify(value)}</span>;
+}
+
+/**
+ * Expanding a multiline cell to show every line (via a "Show N more"/"Show less" toggle) is
+ * implemented and wired end to end (see `isExpanded`/`toggleExpanded` in `table-meta.ts` and the
+ * row-height math in `LogTable.tsx`), but shipped disabled for now: flip this to re-enable it.
+ * While disabled, `MultilineCell` always previews at most `PREVIEW_LINES` and shows a static
+ * indicator with the remaining line count instead of an interactive toggle.
+ */
+const MULTILINE_EXPAND_ENABLED = false;
+
+/**
+ * Previews up to `PREVIEW_LINES` of a multi-line value, mirroring the detail panel's `JsonTable`.
+ * Each logical line is truncated (not wrapped) so the rendered height stays a deterministic
+ * multiple of the line height for the row-height math in `LogTable.tsx`.
+ */
+function MultilineCell({
+  lines,
+  expanded,
+  onToggle,
+  renderLine,
+  title,
+}: {
+  lines: string[];
+  expanded: boolean;
+  onToggle: () => void;
+  renderLine: (line: string, index: number) => React.ReactNode;
+  title?: string;
+}): React.JSX.Element {
+  const { visibleLines, hasMore, moreCount } = previewLines(
+    lines,
+    MULTILINE_EXPAND_ENABLED && expanded,
+  );
+  return (
+    <div className="min-w-0" title={title}>
+      {visibleLines.map((line, i) => (
+        <div key={i} className="truncate">
+          {renderLine(line, i)}
+        </div>
+      ))}
+      {hasMore ? (
+        MULTILINE_EXPAND_ENABLED ? (
+          <button
+            type="button"
+            className="flex items-center gap-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+            onClick={onToggle}
+          >
+            <ChevronDown className={cn('size-3', expanded && 'rotate-180')} />
+            {expanded ? 'Show less' : `Show ${moreCount} more`}
+          </button>
+        ) : (
+          <span
+            className="w-fit rounded bg-muted px-1 text-[10px] text-muted-foreground"
+            title={`${moreCount} more ${moreCount === 1 ? 'line' : 'lines'}`}
+          >
+            ⏎ {moreCount} more
+          </span>
+        )
+      ) : null}
+    </div>
+  );
 }
 
 export function buildColumns(props: PropInfo[], tz: TimeZoneMode): ColumnDef<EntryRow>[] {
@@ -168,20 +236,24 @@ export function buildColumns(props: PropInfo[], tz: TimeZoneMode): ColumnDef<Ent
       size: 640,
       cell: ({ row, table }) => {
         const message = row.original.message;
-        const nl = message.indexOf('\n');
-        const firstLine = nl >= 0 ? message.slice(0, nl) : message;
-        const lines = nl >= 0 ? message.split('\n').length : 1;
+        const terms = table.options.meta?.highlightTerms ?? [];
+        const lines = valueLines(message);
+        if (!lines) {
+          return (
+            <span className="font-mono text-[12px]" title={message}>
+              <Highlighted text={message} terms={terms} />
+            </span>
+          );
+        }
         return (
-          <span className="font-mono text-[12px]" title={message}>
-            <Highlighted text={firstLine} terms={table.options.meta?.highlightTerms ?? []} />
-            {lines > 1 ? (
-              <span
-                className="ml-1.5 rounded bg-muted px-1 text-[10px] text-muted-foreground"
-                title={`${lines} lines`}
-              >
-                ⏎ {lines}
-              </span>
-            ) : null}
+          <span className="font-mono text-[12px]">
+            <MultilineCell
+              lines={lines}
+              expanded={table.options.meta?.isExpanded?.(row.id, 'message') ?? false}
+              onToggle={() => table.options.meta?.toggleExpanded?.(row.id, 'message')}
+              renderLine={(line) => <Highlighted text={line} terms={terms} />}
+              title={message}
+            />
           </span>
         );
       },
@@ -192,11 +264,27 @@ export function buildColumns(props: PropInfo[], tz: TimeZoneMode): ColumnDef<Ent
     accessorFn: (r) => r.props?.[p.key],
     header: p.key,
     size: DEFAULT_PROP_SIZE,
-    cell: ({ row }) => (
-      <span className="font-mono text-[12px]">
-        <JsonValue value={row.original.props?.[p.key]} />
-      </span>
-    ),
+    cell: ({ row, table, column }) => {
+      const value = row.original.props?.[p.key];
+      const lines = typeof value === 'string' ? valueLines(value) : null;
+      if (!lines) {
+        return (
+          <span className="font-mono text-[12px]">
+            <JsonValue value={value} />
+          </span>
+        );
+      }
+      return (
+        <span className="font-mono text-[12px]">
+          <MultilineCell
+            lines={lines}
+            expanded={table.options.meta?.isExpanded?.(row.id, column.id) ?? false}
+            onToggle={() => table.options.meta?.toggleExpanded?.(row.id, column.id)}
+            renderLine={(line) => <>{line}</>}
+          />
+        </span>
+      );
+    },
   }));
   return [...fixed, ...dynamic];
 }

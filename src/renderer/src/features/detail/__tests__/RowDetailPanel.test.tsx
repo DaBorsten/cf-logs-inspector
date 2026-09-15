@@ -75,14 +75,17 @@ describe('row selection and detail panel', () => {
     expect(await screen.findByRole('region', { name: /entry details/i })).toHaveTextContent('#4');
   });
 
-  it('marks multi-line messages and shows them fully in the detail panel', async () => {
+  it('shows multi-line messages fully in the table row and detail panel', async () => {
     seed();
     const user = userEvent.setup();
     renderWithProviders(<LogView />);
     await waitFor(() => expect(dataRows()).toHaveLength(6));
     expect(rowFor(3)).toHaveTextContent('first line');
-    expect(rowFor(3)).toHaveTextContent('⏎ 3');
-    expect(rowFor(3)).not.toHaveTextContent('second line');
+    expect(rowFor(3)).toHaveTextContent('second line');
+    expect(rowFor(3)).toHaveTextContent('third line');
+    expect(
+      within(rowFor(3)).queryByRole('button', { name: /show \d+ more/i }),
+    ).not.toBeInTheDocument();
     await user.click(rowFor(3));
     const panel = await screen.findByRole('region', { name: /entry details/i });
     expect(within(panel).getByRole('tabpanel')).toHaveTextContent('second line');
