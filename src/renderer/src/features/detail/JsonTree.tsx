@@ -64,30 +64,30 @@ function Node({
   return (
     <li role="treeitem" aria-expanded={container ? open : undefined}>
       <div className="group flex items-start gap-1 rounded px-1 hover:bg-accent/50">
-        <span className="invisible flex shrink-0 items-center gap-0.5 group-hover:visible">
-          {canFilter ? (
-            <>
-              <IconButton
-                label={`Filter for ${path}`}
-                onClick={() => onFilter!(path, value, false)}
-              >
-                <Filter />
-              </IconButton>
-              <IconButton label={`Filter out ${path}`} onClick={() => onFilter!(path, value, true)}>
-                <FilterX />
-              </IconButton>
-            </>
-          ) : null}
-          {onCopy ? (
-            <IconButton
-              label={`Copy ${keyLabel ?? 'value'}`}
-              onClick={() =>
-                onCopy(typeof value === 'string' ? value : JSON.stringify(value, null, 2))
-              }
-            >
-              <Copy />
-            </IconButton>
-          ) : null}
+        <span className="flex shrink-0 items-center gap-0.5">
+          <IconButton
+            label={`Filter for ${path}`}
+            onClick={() => onFilter?.(path, value, false)}
+            hidden={!canFilter}
+          >
+            <Filter />
+          </IconButton>
+          <IconButton
+            label={`Filter out ${path}`}
+            onClick={() => onFilter?.(path, value, true)}
+            hidden={!canFilter}
+          >
+            <FilterX />
+          </IconButton>
+          <IconButton
+            label={`Copy ${keyLabel ?? 'value'}`}
+            onClick={() =>
+              onCopy?.(typeof value === 'string' ? value : JSON.stringify(value, null, 2))
+            }
+            hidden={!onCopy}
+          >
+            <Copy />
+          </IconButton>
         </span>
         {container ? (
           <button
@@ -146,10 +146,12 @@ export function Scalar({ value }: { value: unknown }): React.JSX.Element {
 function IconButton({
   label,
   onClick,
+  hidden = false,
   children,
 }: {
   label: string;
   onClick: () => void;
+  hidden?: boolean;
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
@@ -157,10 +159,12 @@ function IconButton({
       type="button"
       className={cn(
         'rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground [&_svg]:size-3.5',
+        hidden ? 'invisible pointer-events-none' : 'invisible group-hover:visible',
       )}
       aria-label={label}
       title={label}
       onClick={onClick}
+      tabIndex={hidden ? -1 : undefined}
     >
       {children}
     </button>
