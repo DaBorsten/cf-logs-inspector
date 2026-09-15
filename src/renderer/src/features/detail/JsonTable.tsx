@@ -176,7 +176,7 @@ function JsonTableRow({
 
 export function Scalar({ value }: { value: unknown }): React.JSX.Element {
   if (value === null) return <span className="text-muted-foreground italic">null</span>;
-  if (typeof value === 'string') return <span className="text-success">&quot;{value}&quot;</span>;
+  if (typeof value === 'string') return <span className="text-success">{value}</span>;
   if (typeof value === 'number') return <span className="text-warning">{String(value)}</span>;
   if (typeof value === 'boolean') return <span className="text-destructive">{String(value)}</span>;
   return <span className="text-muted-foreground">{JSON.stringify(value)}</span>;
