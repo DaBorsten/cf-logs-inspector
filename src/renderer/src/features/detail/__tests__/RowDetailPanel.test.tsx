@@ -5,6 +5,7 @@ import { makeMockEntries, propsOf } from '../../../api/mock/entries';
 import { renderWithProviders, setupMock } from '../../../test/render';
 import { useQueryStore } from '../../../store/query';
 import { useSelectionStore } from '../../../store/selection';
+import { useUiStore } from '../../../store/ui';
 import { EMPTY_SELECTION } from '../../log-table/selection';
 import { LogView } from '../../log-table/LogView';
 
@@ -54,17 +55,17 @@ describe('row selection and detail panel', () => {
     await user.click(rowFor(5));
     const panel = await screen.findByRole('region', { name: /entry details/i });
     expect(rowFor(5)).toHaveAttribute('aria-selected', 'true');
-    const tree = await within(panel).findByRole('tree');
+    const table = await within(panel).findByRole('table');
     expect(panel).toHaveTextContent('2026-09-10 10:00:04.000 Z');
     expect(panel).toHaveTextContent('#5');
-    expect(tree).toHaveTextContent('tenant');
-    expect(tree).toHaveTextContent('"t2"');
+    expect(table).toHaveTextContent('tenant');
+    expect(table).toHaveTextContent('"t2"');
     // Fields sidebar
     const fields = within(panel).getByLabelText('Fields');
     expect(fields).toHaveTextContent('api');
     expect(fields).toHaveTextContent('JSON payload');
 
-    await user.click(within(panel).getByRole('tab', { name: 'raw' }));
+    await user.click(within(panel).getByRole('tab', { name: 'Raw' }));
     expect(within(panel).getByRole('tabpanel')).toHaveTextContent('"msg":"request 5 handled"');
 
     await user.click(within(panel).getByRole('button', { name: /close details/i }));
@@ -156,5 +157,109 @@ describe('row selection and detail panel', () => {
     const panel = await screen.findByRole('region', { name: /entry details/i });
     await user.click(await within(panel).findByRole('button', { name: /^raw$/i }));
     await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith('plain line 6'));
+  });
+
+  it('opens on the message tab when json is preferred but the entry has no parsed JSON', async () => {
+    seed();
+    const user = userEvent.setup();
+    renderWithProviders(<LogView />);
+    await waitFor(() => expect(dataRows()).toHaveLength(6));
+    // id 6 is plain text in the fixture; default preference is 'json'.
+    await user.click(rowFor(6));
+    const panel = await screen.findByRole('region', { name: /entry details/i });
+    expect(within(panel).getByRole('tab', { name: 'Message' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('makes the clicked tab the sticky default for later rows, with a display-only fallback', async () => {
+    seed();
+    act(() => useUiStore.getState().setDefaultDetailTab('raw'));
+    const user = userEvent.setup();
+    renderWithProviders(<LogView />);
+    await waitFor(() => expect(dataRows()).toHaveLength(6));
+
+    // id 5 is JSON; opens on the seeded 'raw' preference.
+    await user.click(rowFor(5));
+    let panel = await screen.findByRole('region', { name: /entry details/i });
+    const detailTabs = () => within(panel).getByRole('tablist', { name: 'Detail view' });
+    expect(within(detailTabs()).getByRole('tab', { name: 'Raw' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+
+    // Clicking JSON persists it as the new preference (no Settings dialog involved).
+    await user.click(within(detailTabs()).getByRole('tab', { name: 'JSON' }));
+    expect(useUiStore.getState().defaultDetailTab).toBe('json');
+    expect(within(detailTabs()).getByRole('tab', { name: 'JSON' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+
+    // id 4 is also JSON; it now opens on the newly-clicked JSON tab, not the original 'raw' seed.
+    await user.click(rowFor(4));
+    panel = await screen.findByRole('region', { name: /entry details/i });
+    expect(within(detailTabs()).getByRole('tab', { name: 'JSON' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+
+    // id 6 is plain text: falls back to Message for display only, the preference stays 'json'.
+    await user.click(rowFor(6));
+    panel = await screen.findByRole('region', { name: /entry details/i });
+    expect(within(detailTabs()).getByRole('tab', { name: 'Message' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(useUiStore.getState().defaultDetailTab).toBe('json');
+
+    // id 5 (JSON) again: jumps back to JSON, proving the fallback never overwrote the preference.
+    await user.click(rowFor(5));
+    panel = await screen.findByRole('region', { name: /entry details/i });
+    expect(within(detailTabs()).getByRole('tab', { name: 'JSON' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('shows the flattened JSON table by default, with per-row filter and copy actions', async () => {
+    seed();
+    const user = userEvent.setup();
+    renderWithProviders(<LogView />);
+    await waitFor(() => expect(dataRows()).toHaveLength(6));
+    await user.click(rowFor(5));
+    const panel = await screen.findByRole('region', { name: /entry details/i });
+    const table = await within(panel).findByRole('table');
+    expect(table).toHaveTextContent('tenant');
+    expect(within(table).getByRole('button', { name: 'Filter for tenant' })).toBeInTheDocument();
+    expect(within(panel).getByRole('tab', { name: 'Table' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('switches to a plain, read-only JSON view via the in-panel toggle', async () => {
+    seed();
+    const user = userEvent.setup();
+    renderWithProviders(<LogView />);
+    await waitFor(() => expect(dataRows()).toHaveLength(6));
+    await user.click(rowFor(5));
+    const panel = await screen.findByRole('region', { name: /entry details/i });
+    await within(panel).findByRole('table');
+    const detailTabs = within(panel).getByRole('tablist', { name: 'Detail view' });
+    const viewModeTabs = () => within(panel).getByRole('tablist', { name: 'JSON view' });
+
+    await user.click(within(viewModeTabs()).getByRole('tab', { name: 'JSON' }));
+    expect(useUiStore.getState().jsonViewMode).toBe('json');
+    expect(within(panel).queryByRole('table')).not.toBeInTheDocument();
+    expect(
+      within(panel).queryByRole('button', { name: 'Filter for tenant' }),
+    ).not.toBeInTheDocument();
+    expect(within(panel).getByRole('tabpanel')).toHaveTextContent('"tenant": "t2"');
+
+    // The toggle only applies to the JSON tab and disappears on other tabs.
+    await user.click(within(detailTabs).getByRole('tab', { name: 'Raw' }));
+    expect(within(panel).queryByRole('tablist', { name: 'JSON view' })).not.toBeInTheDocument();
   });
 });

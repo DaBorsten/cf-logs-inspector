@@ -131,7 +131,13 @@ export function DqlHelpDialog({ className }: { className?: string }): React.JSX.
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}): React.JSX.Element {
   return (
     <section className="flex flex-col gap-1.5">
       <h3 className="text-sm font-semibold">{title}</h3>

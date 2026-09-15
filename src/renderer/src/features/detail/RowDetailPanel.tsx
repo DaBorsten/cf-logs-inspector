@@ -7,6 +7,7 @@ import { errorMessage, invoke } from '../../api/client';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Spinner } from '../../components/ui/misc';
+import { SegmentedControl } from '../../components/ui/segmented-control';
 import { appColor } from '../../lib/colors';
 import { appendClause, isFilterableField, scalarToDql } from '../../lib/dql-edit';
 import { formatTimestamp, subMillisDigits } from '../../lib/time';
@@ -15,13 +16,26 @@ import { useKvJson } from '../../queries/kv';
 import { qk } from '../../queries/keys';
 import { useQueryStore } from '../../store/query';
 import { useSelectionStore } from '../../store/selection';
+import { useUiStore, type JsonViewMode } from '../../store/ui';
 import { Highlighted, buildHighlightTerms } from '../log-table/highlight';
 import { levelClass } from '../log-table/columns';
-import { JsonTree } from './JsonTree';
+import { JsonPlain } from './JsonPlain';
+import { JsonTable } from './JsonTable';
 
 export const DETAIL_KV_KEY = 'layout.detail';
 const MIN_HEIGHT = 120;
 const DEFAULT_HEIGHT = 280;
+
+const JSON_VIEW_MODES: { value: JsonViewMode; label: string }[] = [
+  { value: 'table', label: 'Table' },
+  { value: 'json', label: 'JSON' },
+];
+
+const DETAIL_TAB_LABELS: Record<'message' | 'json' | 'raw', string> = {
+  message: 'Message',
+  json: 'JSON',
+  raw: 'Raw',
+};
 
 export async function copyText(text: string, what = 'Copied'): Promise<void> {
   try {
@@ -102,7 +116,7 @@ function DetailBody({ id, onClose }: { id: number; onClose: () => void }): React
       </div>
     );
   }
-  return <DetailContent entry={data} onClose={onClose} />;
+  return <DetailContent key={data.id} entry={data} onClose={onClose} />;
 }
 
 const FIXED_ROWS: { label: string; field: string; get: (e: EntryDetail) => unknown }[] = [
@@ -126,9 +140,11 @@ function DetailContent({
   const dql = useQueryStore((s) => s.dql);
   const setDql = useQueryStore((s) => s.setDql);
   const terms = React.useMemo(() => buildHighlightTerms(dql), [dql]);
-  const [tab, setTab] = React.useState<'message' | 'json' | 'raw'>(
-    entry.props ? 'json' : 'message',
-  );
+  const defaultDetailTab = useUiStore((s) => s.defaultDetailTab);
+  const setDefaultDetailTab = useUiStore((s) => s.setDefaultDetailTab);
+  const jsonViewMode = useUiStore((s) => s.jsonViewMode);
+  const setJsonViewMode = useUiStore((s) => s.setJsonViewMode);
+  const tab = defaultDetailTab === 'json' && !entry.props ? 'message' : defaultDetailTab;
 
   const filter = (field: string, value: unknown, negate: boolean): void => {
     const next = appendClause(dql, field, value, negate);
@@ -174,17 +190,25 @@ function DetailContent({
               aria-selected={tab === t}
               disabled={t === 'json' && !entry.props}
               className={cn(
-                'rounded px-2 py-0.5 text-[11px] capitalize disabled:opacity-40',
+                'rounded px-2 py-0.5 text-[11px] disabled:opacity-40',
                 tab === t
                   ? 'bg-accent text-accent-foreground'
                   : 'text-muted-foreground hover:text-foreground',
               )}
-              onClick={() => setTab(t)}
+              onClick={() => setDefaultDetailTab(t)}
             >
-              {t}
+              {DETAIL_TAB_LABELS[t]}
             </button>
           ))}
         </div>
+        {tab === 'json' && entry.props ? (
+          <SegmentedControl
+            label="JSON view"
+            options={JSON_VIEW_MODES}
+            value={jsonViewMode}
+            onChange={setJsonViewMode}
+          />
+        ) : null}
         <Button
           size="sm"
           variant="ghost"
@@ -218,11 +242,15 @@ function DetailContent({
               <Highlighted text={entry.message} terms={terms} />
             </pre>
           ) : tab === 'json' && entry.props ? (
-            <JsonTree
-              value={entry.props}
-              onFilter={filter}
-              onCopy={(text) => void copyText(text)}
-            />
+            jsonViewMode === 'table' ? (
+              <JsonTable
+                value={entry.props}
+                onFilter={filter}
+                onCopy={(text) => void copyText(text)}
+              />
+            ) : (
+              <JsonPlain value={entry.props} />
+            )
           ) : (
             <pre className="font-mono text-[12px] leading-5 break-all whitespace-pre-wrap">
               <Highlighted text={entry.raw} terms={terms} />
