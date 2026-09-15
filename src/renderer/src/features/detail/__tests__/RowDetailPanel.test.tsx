@@ -29,7 +29,11 @@ beforeEach(() => {
     tail: false,
     refreshIntervalMs: 0,
   });
-  useSelectionStore.setState({ selection: EMPTY_SELECTION, detailOpen: false });
+  useSelectionStore.setState({
+    selection: EMPTY_SELECTION,
+    detailOpen: false,
+    detailAutoOpenDisabled: false,
+  });
   clipboard = { writeText: vi.fn(() => Promise.resolve()) };
   Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true });
 });
@@ -70,8 +74,11 @@ describe('row selection and detail panel', () => {
 
     await user.click(within(panel).getByRole('button', { name: /close details/i }));
     expect(screen.queryByRole('region', { name: /entry details/i })).not.toBeInTheDocument();
-    // Re-selecting reopens it.
+    // Selecting other rows must not reopen a manually closed panel.
     await user.click(rowFor(4));
+    expect(screen.queryByRole('region', { name: /entry details/i })).not.toBeInTheDocument();
+    // The explicit toggle is the only way back in, and shows the currently focused row.
+    await user.click(screen.getByRole('button', { name: /show details/i }));
     expect(await screen.findByRole('region', { name: /entry details/i })).toHaveTextContent('#4');
   });
 

@@ -13,6 +13,7 @@ import {
   ArrowUpDown,
   Download,
   Globe,
+  PanelBottom,
   Pause,
   Radio,
   RefreshCw,
@@ -72,6 +73,8 @@ export function LogTable(): React.JSX.Element {
   const selection = useSelectionStore((s) => s.selection);
   const setSelection = useSelectionStore((s) => s.setSelection);
   const clearSelection = useSelectionStore((s) => s.clear);
+  const detailOpen = useSelectionStore((s) => s.detailOpen);
+  const setDetailOpen = useSelectionStore((s) => s.setDetailOpen);
   const highlightTerms = React.useMemo(() => buildHighlightTerms(dql), [dql]);
 
   const [expandedCells, setExpandedCells] = React.useState<Set<string>>(() => new Set());
@@ -350,6 +353,17 @@ export function LogTable(): React.JSX.Element {
           aria-label={`Time zone: ${tz === 'local' ? 'local' : 'UTC'}`}
         >
           <Globe /> {tz === 'local' ? 'Local' : 'UTC'}
+        </Button>
+        <Button
+          size="sm"
+          variant={detailOpen ? 'secondary' : 'ghost'}
+          onClick={() => setDetailOpen(!detailOpen)}
+          disabled={selection.focus === null}
+          aria-pressed={detailOpen}
+          aria-label={detailOpen ? 'Hide details' : 'Show details'}
+          title={detailOpen ? 'Hide details' : 'Show details'}
+        >
+          <PanelBottom /> Details
         </Button>
         <ColumnPicker layout={layout} props={propInfos ?? []} onChange={setLayout} />
         <Button

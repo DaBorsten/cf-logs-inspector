@@ -21,7 +21,11 @@ beforeEach(() => {
     tail: false,
     refreshIntervalMs: 0,
   });
-  useSelectionStore.setState({ selection: EMPTY_SELECTION, detailOpen: false });
+  useSelectionStore.setState({
+    selection: EMPTY_SELECTION,
+    detailOpen: false,
+    detailAutoOpenDisabled: false,
+  });
 });
 
 function seed(count = 5) {
