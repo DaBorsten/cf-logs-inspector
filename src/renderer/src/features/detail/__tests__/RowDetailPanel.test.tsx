@@ -180,7 +180,7 @@ describe('row selection and detail panel', () => {
     const user = userEvent.setup();
     renderWithProviders(<LogView />);
     await waitFor(() => expect(dataRows()).toHaveLength(6));
-    // id 6 is plain text in the fixture; default preference is 'json'.
+    // id 6 is plain text in the fixture; default preference is 'table'.
     await user.click(rowFor(6));
     const panel = await screen.findByRole('region', { name: /entry details/i });
     expect(within(panel).getByRole('tab', { name: 'Message' })).toHaveAttribute(
@@ -255,7 +255,7 @@ describe('row selection and detail panel', () => {
     );
   });
 
-  it('switches to a plain, read-only JSON view via the in-panel toggle', async () => {
+  it('shows a plain, read-only JSON view on its own tab, separate from Table', async () => {
     seed();
     const user = userEvent.setup();
     renderWithProviders(<LogView />);
@@ -264,18 +264,19 @@ describe('row selection and detail panel', () => {
     const panel = await screen.findByRole('region', { name: /entry details/i });
     await within(panel).findByRole('table');
     const detailTabs = within(panel).getByRole('tablist', { name: 'Detail view' });
-    const viewModeTabs = () => within(panel).getByRole('tablist', { name: 'JSON view' });
 
-    await user.click(within(viewModeTabs()).getByRole('tab', { name: 'JSON' }));
-    expect(useUiStore.getState().jsonViewMode).toBe('json');
+    await user.click(within(detailTabs).getByRole('tab', { name: 'JSON' }));
+    expect(useUiStore.getState().defaultDetailTab).toBe('json');
     expect(within(panel).queryByRole('table')).not.toBeInTheDocument();
     expect(
       within(panel).queryByRole('button', { name: 'Filter for tenant' }),
     ).not.toBeInTheDocument();
     expect(within(panel).getByRole('tabpanel')).toHaveTextContent('"tenant": "t2"');
 
-    // The toggle only applies to the JSON tab and disappears on other tabs.
-    await user.click(within(detailTabs).getByRole('tab', { name: 'Raw' }));
-    expect(within(panel).queryByRole('tablist', { name: 'JSON view' })).not.toBeInTheDocument();
+    // Table remains a separate tab with the flattened, filterable view.
+    await user.click(within(detailTabs).getByRole('tab', { name: 'Table' }));
+    expect(useUiStore.getState().defaultDetailTab).toBe('table');
+    expect(within(panel).getByRole('table')).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Filter for tenant' })).toBeInTheDocument();
   });
 });

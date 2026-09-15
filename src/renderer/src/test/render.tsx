@@ -13,8 +13,7 @@ export function setupMock(init: Partial<MockState> = {}): MockApi {
     loginConnectionId: null,
     connectionEditor: null,
     workspaceDialogOpen: false,
-    jsonViewMode: 'table',
-    defaultDetailTab: 'json',
+    defaultDetailTab: 'table',
   });
   window.localStorage.clear();
   return installMockApi(init);
